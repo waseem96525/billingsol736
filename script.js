@@ -191,18 +191,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Logout from App (back to Staff Login)
     logoutBtn.addEventListener('click', () => {
-        // If it's the main logout button, we might want to offer choice: 
-        // "Switch User" or "Logout from Cloud"
-        // For now, let's make it "Switch User" behavior by default, 
-        // and maybe add a small link for full logout in the staff login screen (which I did in HTML)
-        
-        // Actually, the HTML has a "Logout" button in the app header. 
-        // Let's make that button just switch staff user.
-        // The "Switch Store Account" link in the staff login screen handles the Firebase signOut.
-        
         currentAppUser = null;
         appContainer.style.display = 'none';
         staffLoginContainer.style.display = 'block';
+    });
+
+    // Full Logout (Sign out from Firebase)
+    document.getElementById('full-logout-btn').addEventListener('click', () => {
+        signOut(auth).then(() => {
+            location.reload();
+        }).catch((error) => {
+            console.error(error);
+        });
     });
 
     function applyPermissions() {
