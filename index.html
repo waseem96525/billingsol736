@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory Management App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="auth-container" class="container" style="max-width: 400px; margin-top: 100px;">
+        <h1 style="text-align: center;">Login</h1>
+        <div class="card">
+            <form id="auth-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" required placeholder="email@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required placeholder="******">
+                </div>
+                <button type="submit" id="auth-btn" style="width: 100%;">Login</button>
+            </form>
+            <p style="text-align: center; margin-top: 15px;">
+                <span id="auth-switch-text">Don't have an account?</span> 
+                <a href="#" id="auth-switch-btn" style="color: #3498db; text-decoration: none;">Register</a>
+            </p>
+            <p id="auth-error" style="color: red; text-align: center; display: none;"></p>
+        </div>
+    </div>
+
+    <div id="staff-login-container" class="container" style="max-width: 400px; margin-top: 100px; display: none;">
+        <h1 style="text-align: center;">Enter PIN</h1>
+        <div class="card">
+            <div class="form-group">
+                <label for="staffPin">User PIN</label>
+                <input type="password" id="staffPin" required placeholder="Enter 4-digit PIN" maxlength="4" style="text-align: center; letter-spacing: 5px; font-size: 24px;">
+            </div>
+            <button id="staff-login-btn" style="width: 100%;">Unlock Terminal</button>
+            <p id="staff-login-error" style="color: red; text-align: center; display: none; margin-top: 10px;"></p>
+            <p style="text-align: center; margin-top: 20px;">
+                <a href="#" id="switch-store-btn" style="color: #7f8c8d; text-decoration: none; font-size: 12px;">Switch Store Account</a>
+            </p>
+        </div>
+    </div>
+
+    <div id="app-container" class="container" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1>Retail Billing App</h1>
+                <p id="current-user-display" style="font-size: 14px; color: #666; margin-top: -10px;">Logged in as: <span id="loggedInStaffName"></span></p>
+            </div>
+            <button id="logout-btn" class="delete-btn" style="padding: 5px 10px; font-size: 14px;">Lock / Switch User</button>
+        </div>
+        
+        <div class="nav-buttons">
+            <button id="nav-inventory" class="nav-btn active" onclick="switchTab('inventory')">Inventory</button>
+            <button id="nav-billing" class="nav-btn" onclick="switchTab('billing')">Billing</button>
+            <button id="nav-reports" class="nav-btn" onclick="switchTab('reports')">Reports</button>
+            <button id="nav-settings" class="nav-btn" onclick="switchTab('settings')">Settings</button>
+        </div>
+
+        <div id="inventory-section">
+            <div class="card">
+                <h2>Inventory Actions</h2>
+                <div class="actions-row">
+                    <input type="text" id="inventorySearch" placeholder="Search Inventory..." onkeyup="filterInventory()">
+                    <button class="secondary-btn" onclick="exportInventory()">Export CSV</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Add New Item</h2>
+            <form id="inventory-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="itemBarcode">Barcode</label>
+                        <input type="text" id="itemBarcode">
+                    </div>
+                    <div class="form-group">
+                        <label for="itemName">Item Name</label>
+                        <input type="text" id="itemName" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="itemCategory">Category</label>
+                        <input type="text" id="itemCategory" list="category-list" placeholder="Select or type new..." required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <datalist id="category-list">
+                            <!-- Options populated by JS -->
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label for="itemQuantity">Quantity</label>
+                        <input type="number" id="itemQuantity" required min="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="itemMRP">MRP (₹)</label>
+                        <input type="number" id="itemMRP" required min="0" step="0.01">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="itemCostPrice">Cost Price (₹)</label>
+                        <input type="number" id="itemCostPrice" required min="0" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="itemSellingPrice">Selling Price (₹)</label>
+                        <input type="number" id="itemSellingPrice" required min="0" step="0.01">
+                    </div>
+                </div>
+                <button type="submit">Add Item</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Inventory List</h2>
+            <div class="table-responsive">
+                <table id="inventory-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Barcode</th>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Quantity</th>
+                            <th>MRP (₹)</th>
+                            <th>Cost (₹)</th>
+                            <th>Selling (₹)</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Items will be added here dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        </div>
+
+        <div id="billing-section" style="display: none;">
+            <!-- Invoice Header & Customer Details -->
+            <div class="card billing-header">
+                <div class="form-row">
+                    <div class="form-group">
+                        <h3>Invoice Details</h3>
+                        <p><strong>Date:</strong> <span id="invoiceDate"></span></p>
+                        <p><strong>Invoice #:</strong> <span id="invoiceNumber"></span></p>
+                        <div style="margin-top: 10px;">
+                            <label for="billSalesPerson" style="font-size: 14px;">Sales Person:</label>
+                            <select id="billSalesPerson" style="width: 100%; padding: 5px; margin-top: 5px;"></select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <h3>Customer Details</h3>
+                        <input type="text" id="customerName" placeholder="Customer Name" class="mb-2">
+                        <input type="tel" id="customerPhone" placeholder="Phone Number">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Add Item to Bill</h2>
+                <form id="billing-form">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label for="billItemSearch">Search Item</label>
+                            <input type="text" id="billItemSearch" list="inventory-datalist" placeholder="Name or Barcode" autocomplete="off">
+                            <datalist id="inventory-datalist">
+                                <!-- Options populated by JS -->
+                            </datalist>
+                        </div>
+                        <div class="form-group">
+                            <label for="billItemQuantity">Qty</label>
+                            <input type="number" id="billItemQuantity" min="1" value="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Discount</label>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="number" id="billItemDiscount" min="0" value="0" style="flex: 1;">
+                                <select id="billItemDiscountType" style="width: 60px; padding: 8px;">
+                                    <option value="percent">%</option>
+                                    <option value="value">₹</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit">Add to Bill</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Current Bill</h2>
+                <div class="table-responsive">
+                    <table id="billing-table">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Price</th>
+                                <th>Qty</th>
+                                <th>Disc</th>
+                                <th>Total</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Bill items here -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="bill-footer">
+                    <div class="bill-summary-grid">
+                        <div class="summary-row">
+                            <span>Subtotal:</span>
+                            <span>₹<span id="billSubtotal">0.00</span></span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Total Discount:</span>
+                            <span>-₹<span id="billTotalDiscount">0.00</span></span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Tax (GST %): <input type="number" id="billTaxRate" value="0" min="0" style="width: 60px; padding: 2px;"></span>
+                            <span>+₹<span id="billTotalTax">0.00</span></span>
+                        </div>
+                        <div class="summary-row grand-total">
+                            <span>Grand Total:</span>
+                            <span>₹<span id="billGrandTotal">0.00</span></span>
+                        </div>
+                    </div>
+                    
+                    <div class="payment-section">
+                        <div class="form-group">
+                            <label>Payment Mode</label>
+                            <select id="paymentMode" style="width: 100%; padding: 8px;">
+                                <option value="Cash">Cash</option>
+                                <option value="Card">Card</option>
+                                <option value="UPI">UPI</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group" style="margin-top: 10px;">
+                            <label>Amount Received (₹)</label>
+                            <input type="number" id="amountReceived" placeholder="0.00" oninput="calculateChange()">
+                        </div>
+                        <div class="form-group">
+                            <label>Change to Return (₹)</label>
+                            <input type="text" id="changeToReturn" readonly style="background-color: #f0f0f0; font-weight: bold; color: green;">
+                        </div>
+
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button class="delete-btn" onclick="clearCurrentBill()" style="flex: 1; background-color: #7f8c8d;">Clear</button>
+                            <button id="print-bill-btn" class="print-btn" onclick="printBill()" style="flex: 2; margin-top: 0;">Generate Invoice</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="reports-section" style="display: none;">
+            <div class="card">
+                <h2>Dashboard Overview</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Total Sales</h3>
+                        <p class="stat-value">₹<span id="totalSales">0.00</span></p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Orders</h3>
+                        <p class="stat-value" id="totalOrders">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Stock Value (Sell)</h3>
+                        <p class="stat-value">₹<span id="totalInventoryValue">0.00</span></p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Items</h3>
+                        <p class="stat-value" id="totalStockCount">0</p>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px;">
+                <div class="card" style="flex: 1; min-width: 300px; margin-bottom: 0;">
+                    <h2>Sales Report</h2>
+                    <table style="width: 100%;">
+                        <tr>
+                            <td style="padding: 10px; border-bottom: 1px solid #eee;">Today's Sales</td>
+                            <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">₹<span id="salesToday">0.00</span></td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px; border-bottom: 1px solid #eee;">This Month</td>
+                            <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">₹<span id="salesMonth">0.00</span></td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px;">Stock Value (Cost)</td>
+                            <td style="padding: 10px; text-align: right; font-weight: bold;">₹<span id="totalInventoryCost">0.00</span></td>
+                        </tr>
+                    </table>
+                    
+                    <h3 style="margin-top: 20px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Category Sales</h3>
+                    <div class="table-responsive" style="max-height: 150px; overflow-y: auto;">
+                        <table id="category-sales-table" style="margin-top: 0;">
+                            <thead>
+                                <tr>
+                                    <th>Category</th>
+                                    <th>Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="margin-top: 20px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Sales by Employee</h3>
+                    <div class="table-responsive" style="max-height: 150px; overflow-y: auto;">
+                        <table id="employee-sales-table" style="margin-top: 0;">
+                            <thead>
+                                <tr>
+                                    <th>Staff Name</th>
+                                    <th>Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card" style="flex: 1; min-width: 300px; margin-bottom: 0;">
+                    <h2>Low Stock Alerts</h2>
+                    <div class="table-responsive" style="max-height: 150px; overflow-y: auto;">
+                        <table id="low-stock-table" style="margin-top: 0;">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Qty</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Low stock items -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>Recent Transactions</h2>
+                    <button class="secondary-btn" onclick="exportTransactions()">Export CSV</button>
+                </div>
+                <div class="table-responsive">
+                    <table id="transactions-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Invoice #</th>
+                                <th>Customer</th>
+                                <th>Amount</th>
+                                <th>Payment</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Transactions will be added here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="settings-section" style="display: none;">
+            <div class="card">
+                <h2>User Management</h2>
+                <form id="user-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="userName">Name</label>
+                            <input type="text" id="userName" required placeholder="Employee Name">
+                        </div>
+                        <div class="form-group">
+                            <label for="userRole">Role</label>
+                            <select id="userRole" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                <option value="Staff">Staff</option>
+                                <option value="Admin">Admin</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="userPin">PIN (4-digit)</label>
+                            <input type="text" id="userPin" required placeholder="1234" maxlength="4" pattern="\d{4}">
+                        </div>
+                    </div>
+                    <button type="submit">Add User</button>
+                </form>
+                <div class="table-responsive" style="margin-top: 15px;">
+                    <table id="users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Role</th>
+                                <th>PIN</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Store Settings</h2>
+                <form id="settings-form">
+                    <div class="form-group">
+                        <label for="storeName">Store Name</label>
+                        <input type="text" id="storeName" placeholder="My Retail Store">
+                    </div>
+                    <div class="form-group">
+                        <label for="storeAddress">Store Address</label>
+                        <input type="text" id="storeAddress" placeholder="123 Main St, City">
+                    </div>
+                    <div class="form-group">
+                        <label for="storePhone">Store Phone</label>
+                        <input type="text" id="storePhone" placeholder="+91 9876543210">
+                    </div>
+                    <div class="form-group">
+                        <label for="defaultTax">Default Tax Rate (%)</label>
+                        <input type="number" id="defaultTax" min="0" step="0.01" value="0">
+                    </div>
+                    <button type="submit">Save Settings</button>
+                </form>
+            </div>
+            
+            <div class="card">
+                <h2>Data Management</h2>
+                <button class="delete-btn" onclick="clearAllData()" style="width: 100%;">Clear All Data (Factory Reset)</button>
+            </div>
+        </div>
+    </div>
+    <div id="return-modal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
+        <div class="modal-content" style="background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 600px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">Return / Exchange Items</h2>
+                <span class="close" onclick="closeReturnModal()" style="color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+            </div>
+            <p><strong>Original Invoice:</strong> <span id="returnInvoiceNo"></span></p>
+            <div class="table-responsive">
+                <table id="return-items-table">
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Sold Qty</th>
+                            <th>Unit Price</th>
+                            <th>Return Qty</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div style="margin-top: 20px; text-align: right; border-top: 1px solid #eee; padding-top: 15px;">
+                <h3>Total Refund: ₹<span id="returnTotalAmount">0.00</span></h3>
+                <button onclick="processReturn()" class="delete-btn" style="background-color: #e74c3c;">Process Refund</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
