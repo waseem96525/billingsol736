@@ -53,7 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
         storeName: 'My Retail Store',
         storeAddress: '',
         storePhone: '',
-        defaultTax: 0
+        defaultTax: 0,
+        printerFormat: 'A4'
     };
     let categories = ['General', 'Grocery', 'Electronics', 'Clothing', 'Pharmacy', 'Other'];
     let appUsers = [{name: 'Owner', role: 'Admin', pin: '0000'}];
@@ -541,6 +542,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Call on load
     initBillingInfo();
 
+    // Scanner Mode Toggle Logic
+    document.getElementById('scannerMode').addEventListener('change', (e) => {
+        const isScannerMode = e.target.checked;
+        document.getElementById('billItemQuantity').disabled = isScannerMode;
+        document.getElementById('billItemDiscount').disabled = isScannerMode;
+        document.getElementById('billItemDiscountType').disabled = isScannerMode;
+        
+        if (isScannerMode) {
+            document.getElementById('billItemSearch').focus();
+            document.getElementById('billItemSearch').placeholder = "Scan Barcode...";
+        } else {
+            document.getElementById('billItemSearch').placeholder = "Name or Barcode";
+        }
+    });
+
     function updateBillingDatalist() {
         inventoryDatalist.innerHTML = '';
         inventory.forEach(item => {
@@ -555,15 +571,28 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         
         const searchInput = document.getElementById('billItemSearch').value;
-        const quantity = parseInt(document.getElementById('billItemQuantity').value);
-        const discountInput = parseFloat(document.getElementById('billItemDiscount').value) || 0;
-        const discountType = document.getElementById('billItemDiscountType').value;
+        const scannerMode = document.getElementById('scannerMode').checked;
+        
+        let quantity = parseInt(document.getElementById('billItemQuantity').value);
+        let discountInput = parseFloat(document.getElementById('billItemDiscount').value) || 0;
+        let discountType = document.getElementById('billItemDiscountType').value;
+
+        // Scanner Mode Overrides
+        if (scannerMode) {
+            quantity = 1;
+            discountInput = 0;
+        }
 
         // Find item by name or barcode
         const item = inventory.find(i => i.name === searchInput || i.barcode === searchInput);
 
         if (item) {
-            if (item.quantity >= quantity) {
+            // Check stock (considering items already in current bill)
+            const currentQtyInBill = currentBill
+                .filter(b => b.name === item.name)
+                .reduce((sum, b) => sum + b.quantity, 0);
+
+            if (item.quantity >= (currentQtyInBill + quantity)) {
                 const price = parseFloat(item.sellingPrice);
                 const lineTotal = price * quantity;
                 
@@ -581,16 +610,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const total = lineTotal - discountAmount;
 
-                currentBill.push({
-                    name: item.name,
-                    price: price,
-                    quantity: quantity,
-                    discountType: discountType,
-                    discountValue: discountInput,
-                    discountAmount: discountAmount,
-                    total: total,
-                    originalItem: item
-                });
+                // Check if we should merge with existing line item (Scanner Mode Optimization)
+                const existingItemIndex = currentBill.findIndex(b => b.name === item.name && b.discountValue === discountInput && b.discountType === discountType);
+                
+                if (scannerMode && existingItemIndex > -1) {
+                    // Update existing line item
+                    currentBill[existingItemIndex].quantity += quantity;
+                    currentBill[existingItemIndex].total += total;
+                } else {
+                    // Add new line item
+                    currentBill.push({
+                        name: item.name,
+                        price: price,
+                        quantity: quantity,
+                        discountType: discountType,
+                        discountValue: discountInput,
+                        discountAmount: discountAmount,
+                        total: total,
+                        originalItem: item
+                    });
+                }
                 
                 renderBill();
                 billingForm.reset();
@@ -599,9 +638,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('billItemSearch').focus();
             } else {
                 alert(`Insufficient stock! Only ${item.quantity} available.`);
+                // If scanner mode, clear input anyway to prevent blocking
+                if (scannerMode) {
+                    document.getElementById('billItemSearch').value = '';
+                    document.getElementById('billItemSearch').focus();
+                }
             }
         } else {
             alert('Item not found!');
+            // If scanner mode, clear input anyway
+            if (scannerMode) {
+                document.getElementById('billItemSearch').value = '';
+                document.getElementById('billItemSearch').focus();
+            }
         }
     });
 
@@ -749,41 +798,90 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function generateInvoiceHTML(transaction) {
+        const format = settings.printerFormat || 'A4';
+        const isThermal = format === '58mm' || format === '80mm';
+        const width = format === '58mm' ? '58mm' : (format === '80mm' ? '80mm' : '100%');
+        const fontSize = isThermal ? '12px' : '16px';
+        const padding = isThermal ? '0' : '20px';
+
         const printWindow = window.open('', '', 'height=600,width=800');
         printWindow.document.write('<html><head><title>Invoice ' + transaction.invoiceNo + '</title>');
         printWindow.document.write('<style>');
-        printWindow.document.write('body { font-family: sans-serif; padding: 20px; }');
-        printWindow.document.write('.header { text-align: center; margin-bottom: 20px; }');
-        printWindow.document.write('.details { margin-bottom: 20px; }');
-        printWindow.document.write('table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }');
-        printWindow.document.write('th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }');
-        printWindow.document.write('.totals { text-align: right; }');
+        printWindow.document.write(`body { font-family: 'Courier New', monospace; padding: ${padding}; width: ${width}; margin: 0 auto; font-size: ${fontSize}; }`);
+        printWindow.document.write('.header { text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px; }');
+        printWindow.document.write('.header h1 { margin: 0; font-size: 1.2em; }');
+        printWindow.document.write('.header p { margin: 2px 0; }');
+        printWindow.document.write('.details { margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px; }');
+        printWindow.document.write('.details p { margin: 2px 0; }');
+        printWindow.document.write('table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }');
+        printWindow.document.write('th { text-align: left; border-bottom: 1px dashed #000; }');
+        printWindow.document.write('td { text-align: left; }');
+        printWindow.document.write('.totals { text-align: right; border-top: 1px dashed #000; padding-top: 10px; }');
+        printWindow.document.write('.totals p { margin: 2px 0; }');
+        printWindow.document.write('.footer { text-align: center; margin-top: 20px; font-size: 0.8em; }');
+        
+        if (isThermal) {
+            printWindow.document.write('@page { margin: 0; }'); // Remove browser margins for thermal
+        }
+        
         printWindow.document.write('</style>');
         printWindow.document.write('</head><body>');
         
-        printWindow.document.write('<div class="header"><h1>' + settings.storeName + '</h1><p>' + settings.storeAddress + '</p><p>Phone: ' + settings.storePhone + '</p><h3>Retail Invoice</h3><p>Invoice #: ' + transaction.invoiceNo + '</p><p>Date: ' + transaction.date + '</p></div>');
-        printWindow.document.write('<div class="details"><p><strong>Customer:</strong> ' + transaction.customerName + '</p><p><strong>Phone:</strong> ' + transaction.customerPhone + '</p><p><strong>Served By:</strong> ' + (transaction.salesPerson || 'Owner') + '</p></div>');
+        printWindow.document.write('<div class="header">');
+        printWindow.document.write('<h1>' + settings.storeName + '</h1>');
+        if(settings.storeAddress) printWindow.document.write('<p>' + settings.storeAddress + '</p>');
+        if(settings.storePhone) printWindow.document.write('<p>Tel: ' + settings.storePhone + '</p>');
+        printWindow.document.write('<p>Inv: ' + transaction.invoiceNo + '</p>');
+        printWindow.document.write('<p>' + transaction.date + '</p>');
+        printWindow.document.write('</div>');
+
+        printWindow.document.write('<div class="details">');
+        printWindow.document.write('<p>Cust: ' + transaction.customerName + '</p>');
+        if(transaction.customerPhone) printWindow.document.write('<p>Ph: ' + transaction.customerPhone + '</p>');
+        printWindow.document.write('<p>Staff: ' + (transaction.salesPerson || 'Owner') + '</p>');
+        printWindow.document.write('</div>');
         
         printWindow.document.write('<table><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>');
         transaction.items.forEach(item => {
-            printWindow.document.write('<tr><td>' + item.name + '</td><td>' + item.quantity + '</td><td>₹' + item.price.toFixed(2) + '</td><td>₹' + item.total.toFixed(2) + '</td></tr>');
+            // Truncate long names for thermal
+            let name = item.name;
+            if (isThermal && name.length > 15) {
+                name = name.substring(0, 15) + '..';
+            }
+            printWindow.document.write('<tr>');
+            printWindow.document.write('<td>' + name + '</td>');
+            printWindow.document.write('<td>' + item.quantity + '</td>');
+            printWindow.document.write('<td>' + item.price.toFixed(0) + '</td>'); // Remove decimals for space
+            printWindow.document.write('<td>' + item.total.toFixed(0) + '</td>');
+            printWindow.document.write('</tr>');
         });
         printWindow.document.write('</tbody></table>');
         
         printWindow.document.write('<div class="totals">');
-        printWindow.document.write('<p>Subtotal: ₹' + transaction.subtotal + '</p>');
-        printWindow.document.write('<p>Discount: -₹' + transaction.totalDiscount + '</p>');
-        printWindow.document.write('<p>Tax: +₹' + transaction.taxAmount + '</p>');
-        printWindow.document.write('<h3>Grand Total: ₹' + transaction.grandTotal + '</h3>');
-        printWindow.document.write('<p>Payment Mode: ' + transaction.paymentMode + '</p>');
+        printWindow.document.write('<p>Sub: ' + transaction.subtotal + '</p>');
+        if (parseFloat(transaction.totalDiscount) > 0) printWindow.document.write('<p>Disc: -' + transaction.totalDiscount + '</p>');
+        if (parseFloat(transaction.taxAmount) > 0) printWindow.document.write('<p>Tax: +' + transaction.taxAmount + '</p>');
+        printWindow.document.write('<h3>Total: ' + transaction.grandTotal + '</h3>');
+        printWindow.document.write('<p>Mode: ' + transaction.paymentMode + '</p>');
         printWindow.document.write('</div>');
         
+        printWindow.document.write('<div class="footer">');
+        printWindow.document.write('<p>Thank You! Visit Again.</p>');
+        printWindow.document.write('</div>');
+
         printWindow.document.write('</body></html>');
         printWindow.document.close();
-        printWindow.print();
+        // Wait for styles to load
+        setTimeout(() => {
+            printWindow.print();
+            // printWindow.close(); // Optional: Close after print
+        }, 250);
     }
 
     // --- Reports System ---
+    let salesChartInstance = null;
+    let categoryChartInstance = null;
+
     function renderReports() {
         const totalSalesElement = document.getElementById('totalSales');
         const totalOrdersElement = document.getElementById('totalOrders');
@@ -803,10 +901,18 @@ document.addEventListener('DOMContentLoaded', () => {
         let salesMonth = 0;
         let categorySales = {};
         let employeeSales = {};
+        let dailySales = {}; // For Chart
         
         const todayStr = new Date().toLocaleDateString();
         const currentMonth = new Date().getMonth();
         const currentYear = new Date().getFullYear();
+
+        // Initialize last 30 days for chart
+        for (let i = 29; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            dailySales[d.toLocaleDateString()] = 0;
+        }
 
         transactions.forEach(t => {
             const amount = parseFloat(t.grandTotal);
@@ -814,6 +920,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (t.date === todayStr) {
                 salesToday += amount;
+            }
+            
+            // Daily Sales for Chart
+            if (dailySales.hasOwnProperty(t.date)) {
+                dailySales[t.date] += amount;
             }
             
             // Simple month check - try to parse date
@@ -959,6 +1070,80 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
             transactionsTableBody.appendChild(row);
         });
+
+        // --- Render Charts ---
+        
+        // 1. Sales Trend Chart
+        const salesCtx = document.getElementById('salesChart');
+        if (salesCtx) {
+            if (salesChartInstance) {
+                salesChartInstance.destroy();
+            }
+            
+            const dates = Object.keys(dailySales);
+            const salesData = Object.values(dailySales);
+
+            salesChartInstance = new Chart(salesCtx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Daily Sales (₹)',
+                        data: salesData,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // 2. Category Chart
+        const categoryCtx = document.getElementById('categoryChart');
+        if (categoryCtx) {
+            if (categoryChartInstance) {
+                categoryChartInstance.destroy();
+            }
+
+            const catLabels = Object.keys(categorySales);
+            const catData = Object.values(categorySales);
+            
+            // Generate random colors
+            const backgroundColors = catLabels.map(() => 
+                `hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)`
+            );
+
+            categoryChartInstance = new Chart(categoryCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: catLabels,
+                    datasets: [{
+                        data: catData,
+                        backgroundColor: backgroundColors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
     }
 
     window.openReturnModal = function(invoiceNo) {
@@ -1124,6 +1309,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('storeAddress').value = settings.storeAddress;
         document.getElementById('storePhone').value = settings.storePhone;
         document.getElementById('defaultTax').value = settings.defaultTax;
+        document.getElementById('printerFormat').value = settings.printerFormat || 'A4';
     }
 
     document.getElementById('settings-form').addEventListener('submit', (e) => {
@@ -1132,7 +1318,8 @@ document.addEventListener('DOMContentLoaded', () => {
             storeName: document.getElementById('storeName').value,
             storeAddress: document.getElementById('storeAddress').value,
             storePhone: document.getElementById('storePhone').value,
-            defaultTax: parseFloat(document.getElementById('defaultTax').value) || 0
+            defaultTax: parseFloat(document.getElementById('defaultTax').value) || 0,
+            printerFormat: document.getElementById('printerFormat').value
         };
         if (currentUser) {
             set(ref(db, `users/${currentUser.uid}/settings`), settings);
