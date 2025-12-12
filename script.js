@@ -53,8 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
         storeName: 'My Retail Store',
         storeAddress: '',
         storePhone: '',
-        defaultTax: 0,
-        printerFormat: 'A4'
+        defaultTax: 0
     };
     let categories = ['General', 'Grocery', 'Electronics', 'Clothing', 'Pharmacy', 'Other'];
     let appUsers = [{name: 'Owner', role: 'Admin', pin: '0000'}];
@@ -798,84 +797,38 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function generateInvoiceHTML(transaction) {
-        const format = settings.printerFormat || 'A4';
-        const isThermal = format === '58mm' || format === '80mm';
-        const width = format === '58mm' ? '58mm' : (format === '80mm' ? '80mm' : '100%');
-        const fontSize = isThermal ? '12px' : '16px';
-        const padding = isThermal ? '0' : '20px';
-
         const printWindow = window.open('', '', 'height=600,width=800');
         printWindow.document.write('<html><head><title>Invoice ' + transaction.invoiceNo + '</title>');
         printWindow.document.write('<style>');
-        printWindow.document.write(`body { font-family: 'Courier New', monospace; padding: ${padding}; width: ${width}; margin: 0 auto; font-size: ${fontSize}; }`);
-        printWindow.document.write('.header { text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px; }');
-        printWindow.document.write('.header h1 { margin: 0; font-size: 1.2em; }');
-        printWindow.document.write('.header p { margin: 2px 0; }');
-        printWindow.document.write('.details { margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px; }');
-        printWindow.document.write('.details p { margin: 2px 0; }');
-        printWindow.document.write('table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }');
-        printWindow.document.write('th { text-align: left; border-bottom: 1px dashed #000; }');
-        printWindow.document.write('td { text-align: left; }');
-        printWindow.document.write('.totals { text-align: right; border-top: 1px dashed #000; padding-top: 10px; }');
-        printWindow.document.write('.totals p { margin: 2px 0; }');
-        printWindow.document.write('.footer { text-align: center; margin-top: 20px; font-size: 0.8em; }');
-        
-        if (isThermal) {
-            printWindow.document.write('@page { margin: 0; }'); // Remove browser margins for thermal
-        }
-        
+        printWindow.document.write('body { font-family: sans-serif; padding: 20px; }');
+        printWindow.document.write('.header { text-align: center; margin-bottom: 20px; }');
+        printWindow.document.write('.details { margin-bottom: 20px; }');
+        printWindow.document.write('table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }');
+        printWindow.document.write('th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }');
+        printWindow.document.write('.totals { text-align: right; }');
         printWindow.document.write('</style>');
         printWindow.document.write('</head><body>');
         
-        printWindow.document.write('<div class="header">');
-        printWindow.document.write('<h1>' + settings.storeName + '</h1>');
-        if(settings.storeAddress) printWindow.document.write('<p>' + settings.storeAddress + '</p>');
-        if(settings.storePhone) printWindow.document.write('<p>Tel: ' + settings.storePhone + '</p>');
-        printWindow.document.write('<p>Inv: ' + transaction.invoiceNo + '</p>');
-        printWindow.document.write('<p>' + transaction.date + '</p>');
-        printWindow.document.write('</div>');
-
-        printWindow.document.write('<div class="details">');
-        printWindow.document.write('<p>Cust: ' + transaction.customerName + '</p>');
-        if(transaction.customerPhone) printWindow.document.write('<p>Ph: ' + transaction.customerPhone + '</p>');
-        printWindow.document.write('<p>Staff: ' + (transaction.salesPerson || 'Owner') + '</p>');
-        printWindow.document.write('</div>');
+        printWindow.document.write('<div class="header"><h1>' + settings.storeName + '</h1><p>' + settings.storeAddress + '</p><p>Phone: ' + settings.storePhone + '</p><h3>Retail Invoice</h3><p>Invoice #: ' + transaction.invoiceNo + '</p><p>Date: ' + transaction.date + '</p></div>');
+        printWindow.document.write('<div class="details"><p><strong>Customer:</strong> ' + transaction.customerName + '</p><p><strong>Phone:</strong> ' + transaction.customerPhone + '</p><p><strong>Served By:</strong> ' + (transaction.salesPerson || 'Owner') + '</p></div>');
         
         printWindow.document.write('<table><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>');
         transaction.items.forEach(item => {
-            // Truncate long names for thermal
-            let name = item.name;
-            if (isThermal && name.length > 15) {
-                name = name.substring(0, 15) + '..';
-            }
-            printWindow.document.write('<tr>');
-            printWindow.document.write('<td>' + name + '</td>');
-            printWindow.document.write('<td>' + item.quantity + '</td>');
-            printWindow.document.write('<td>' + item.price.toFixed(0) + '</td>'); // Remove decimals for space
-            printWindow.document.write('<td>' + item.total.toFixed(0) + '</td>');
-            printWindow.document.write('</tr>');
+            printWindow.document.write('<tr><td>' + item.name + '</td><td>' + item.quantity + '</td><td>₹' + item.price.toFixed(2) + '</td><td>₹' + item.total.toFixed(2) + '</td></tr>');
         });
         printWindow.document.write('</tbody></table>');
         
         printWindow.document.write('<div class="totals">');
-        printWindow.document.write('<p>Sub: ' + transaction.subtotal + '</p>');
-        if (parseFloat(transaction.totalDiscount) > 0) printWindow.document.write('<p>Disc: -' + transaction.totalDiscount + '</p>');
-        if (parseFloat(transaction.taxAmount) > 0) printWindow.document.write('<p>Tax: +' + transaction.taxAmount + '</p>');
-        printWindow.document.write('<h3>Total: ' + transaction.grandTotal + '</h3>');
-        printWindow.document.write('<p>Mode: ' + transaction.paymentMode + '</p>');
+        printWindow.document.write('<p>Subtotal: ₹' + transaction.subtotal + '</p>');
+        printWindow.document.write('<p>Discount: -₹' + transaction.totalDiscount + '</p>');
+        printWindow.document.write('<p>Tax: +₹' + transaction.taxAmount + '</p>');
+        printWindow.document.write('<h3>Grand Total: ₹' + transaction.grandTotal + '</h3>');
+        printWindow.document.write('<p>Payment Mode: ' + transaction.paymentMode + '</p>');
         printWindow.document.write('</div>');
         
-        printWindow.document.write('<div class="footer">');
-        printWindow.document.write('<p>Thank You! Visit Again.</p>');
-        printWindow.document.write('</div>');
-
         printWindow.document.write('</body></html>');
         printWindow.document.close();
-        // Wait for styles to load
-        setTimeout(() => {
-            printWindow.print();
-            // printWindow.close(); // Optional: Close after print
-        }, 250);
+        printWindow.print();
     }
 
     // --- Reports System ---
@@ -1309,7 +1262,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('storeAddress').value = settings.storeAddress;
         document.getElementById('storePhone').value = settings.storePhone;
         document.getElementById('defaultTax').value = settings.defaultTax;
-        document.getElementById('printerFormat').value = settings.printerFormat || 'A4';
     }
 
     document.getElementById('settings-form').addEventListener('submit', (e) => {
@@ -1318,8 +1270,7 @@ document.addEventListener('DOMContentLoaded', () => {
             storeName: document.getElementById('storeName').value,
             storeAddress: document.getElementById('storeAddress').value,
             storePhone: document.getElementById('storePhone').value,
-            defaultTax: parseFloat(document.getElementById('defaultTax').value) || 0,
-            printerFormat: document.getElementById('printerFormat').value
+            defaultTax: parseFloat(document.getElementById('defaultTax').value) || 0
         };
         if (currentUser) {
             set(ref(db, `users/${currentUser.uid}/settings`), settings);
