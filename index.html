@@ -30,21 +30,6 @@
         </div>
     </div>
 
-    <div id="staff-login-container" class="container" style="max-width: 400px; margin-top: 100px; display: none;">
-        <h1 style="text-align: center;">Enter PIN</h1>
-        <div class="card">
-            <div class="form-group">
-                <label for="staffPin">User PIN</label>
-                <input type="password" id="staffPin" required placeholder="Enter 4-digit PIN" maxlength="4" style="text-align: center; letter-spacing: 5px; font-size: 24px;">
-            </div>
-            <button id="staff-login-btn" style="width: 100%;">Unlock Terminal</button>
-            <p id="staff-login-error" style="color: red; text-align: center; display: none; margin-top: 10px;"></p>
-            <p style="text-align: center; margin-top: 20px;">
-                <a href="#" id="switch-store-btn" style="color: #7f8c8d; text-decoration: none; font-size: 12px;">Switch Store Account</a>
-            </p>
-        </div>
-    </div>
-
     <div id="app-container" class="container" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
@@ -52,7 +37,6 @@
                 <p id="current-user-display" style="font-size: 14px; color: #666; margin-top: -10px;">Logged in as: <span id="loggedInStaffName"></span></p>
             </div>
             <div style="display: flex; gap: 10px;">
-                <button id="logout-btn" class="secondary-btn" style="padding: 5px 10px; font-size: 14px;">Lock Terminal</button>
                 <button id="full-logout-btn" class="delete-btn" style="padding: 5px 10px; font-size: 14px;">Logout</button>
             </div>
         </div>

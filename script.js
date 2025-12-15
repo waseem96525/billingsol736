@@ -31,7 +31,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const authSwitchBtn = document.getElementById('auth-switch-btn');
     const authSwitchText = document.getElementById('auth-switch-text');
     const authError = document.getElementById('auth-error');
-    const logoutBtn = document.getElementById('logout-btn');
 
     let isLogin = true;
     let currentUser = null;
@@ -60,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentAppUser = null;
     let currentBill = [];
     let editIndex = -1;
-    let shouldAutoLoginAdmin = false;
 
     // --- Auth Logic ---
     authSwitchBtn.addEventListener('click', (e) => {
@@ -91,7 +89,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then((userCredential) => {
                     // Signed in 
                     console.log("Logged in");
-                    shouldAutoLoginAdmin = true; // Flag to auto-login as Admin
                 })
                 .catch((error) => {
                     console.error("Login Error:", error.code, error.message);
@@ -126,24 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Switch Store Account (Firebase SignOut)
-    document.getElementById('switch-store-btn').addEventListener('click', (e) => {
-        e.preventDefault();
-        signOut(auth).then(() => {
-            // Sign-out successful.
-            location.reload();
-        }).catch((error) => {
-            console.error(error);
-        });
-    });
-
-    /* 
-    // Old Logout Listener Removed - Now handled by Staff Logout logic below
-    logoutBtn.addEventListener('click', () => {
-        signOut(auth)...
-    }); 
-    */
-
     onAuthStateChanged(auth, (user) => {
         if (user) {
             currentUser = user;
@@ -155,7 +134,6 @@ document.addEventListener('DOMContentLoaded', () => {
             currentAppUser = null;
             authContainer.style.display = 'block';
             appContainer.style.display = 'none';
-            document.getElementById('staff-login-container').style.display = 'none';
             // Clear data from UI
             inventory = [];
             transactions = [];
@@ -163,38 +141,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Staff Login Logic
-    const staffLoginContainer = document.getElementById('staff-login-container');
-    const staffPinInput = document.getElementById('staffPin');
-    const staffLoginBtn = document.getElementById('staff-login-btn');
-    const staffLoginError = document.getElementById('staff-login-error');
+    // Staff Login Logic Removed
 
-    staffLoginBtn.addEventListener('click', () => {
-        const pin = staffPinInput.value;
-        const user = appUsers.find(u => u.pin === pin);
-        
-        if (user) {
-            currentAppUser = user;
-            staffLoginContainer.style.display = 'none';
-            appContainer.style.display = 'block';
-            document.getElementById('loggedInStaffName').textContent = user.name + ' (' + user.role + ')';
-            staffPinInput.value = '';
-            staffLoginError.style.display = 'none';
-            
-            // Apply permissions
-            applyPermissions();
-        } else {
-            staffLoginError.textContent = 'Invalid PIN';
-            staffLoginError.style.display = 'block';
-        }
-    });
-
-    // Logout from App (back to Staff Login)
-    logoutBtn.addEventListener('click', () => {
-        currentAppUser = null;
-        appContainer.style.display = 'none';
-        staffLoginContainer.style.display = 'block';
-    });
 
     // Full Logout (Sign out from Firebase)
     document.getElementById('full-logout-btn').addEventListener('click', () => {
@@ -264,22 +212,14 @@ document.addEventListener('DOMContentLoaded', () => {
             renderAppUsers();
             updateSalesPersonDropdown();
             
-            // Auto-login Admin if this was a fresh login
-            if (shouldAutoLoginAdmin) {
-                const adminUser = appUsers.find(u => u.role === 'Admin');
-                if (adminUser) {
-                    currentAppUser = adminUser;
-                    staffLoginContainer.style.display = 'none';
-                    appContainer.style.display = 'block';
-                    document.getElementById('loggedInStaffName').textContent = adminUser.name + ' (' + adminUser.role + ')';
-                    applyPermissions();
-                    shouldAutoLoginAdmin = false; // Reset flag
-                    return;
-                }
+            // Auto-login as Admin/Owner
+            const adminUser = appUsers.find(u => u.role === 'Admin') || appUsers[0];
+            if (adminUser) {
+                currentAppUser = adminUser;
+                appContainer.style.display = 'block';
+                document.getElementById('loggedInStaffName').textContent = adminUser.name + ' (' + adminUser.role + ')';
+                applyPermissions();
             }
-
-            // Show Staff Login (PIN Screen)
-            staffLoginContainer.style.display = 'block';
         }).catch((error) => {
             console.error(error);
         });
