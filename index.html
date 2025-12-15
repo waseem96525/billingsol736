@@ -52,8 +52,10 @@
             <div class="card">
                 <h2>Inventory Actions</h2>
                 <div class="actions-row">
-                    <input type="text" id="inventorySearch" placeholder="Search Inventory..." onkeyup="filterInventory()">
-                    <button class="secondary-btn" onclick="exportInventory()">Export CSV</button>
+                        <input type="text" id="inventorySearch" placeholder="Search Inventory...">
+                        <button class="secondary-btn" onclick="exportInventory()">Export CSV</button>
+                        <button class="secondary-btn" onclick="document.getElementById('importInventoryFile').click()">Import CSV</button>
+                        <input type="file" id="importInventoryFile" accept=".csv" style="display:none" />
                 </div>
             </div>
 
@@ -296,6 +298,11 @@
             <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px;">
                 <div class="card" style="flex: 1; min-width: 300px; margin-bottom: 0;">
                     <h2>Sales Report</h2>
+                    <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+                        <label for="dailyReportDate" style="margin:0; font-weight:normal;">Daily Report:</label>
+                        <input type="date" id="dailyReportDate" style="padding:6px;" />
+                        <button class="secondary-btn" onclick="renderDailySales(document.getElementById('dailyReportDate').value)">Show</button>
+                    </div>
                     <table style="width: 100%;">
                         <tr>
                             <td style="padding: 10px; border-bottom: 1px solid #eee;">Today's Sales</td>

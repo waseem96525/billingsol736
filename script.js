@@ -61,6 +61,101 @@ document.addEventListener('DOMContentLoaded', () => {
     let editIndex = -1;
 
     // --- Auth Logic ---
+    // Utility: debounce
+    function debounce(fn, delay) {
+        let t;
+        return function(...args) {
+            clearTimeout(t);
+            t = setTimeout(() => fn.apply(this, args), delay);
+        };
+    }
+
+    // Animation functions
+    function createSparkles(x, y) {
+        for (let i = 0; i < 5; i++) {
+            const sparkle = document.createElement('div');
+            sparkle.className = 'sparkle';
+            sparkle.style.left = (x + (Math.random() - 0.5) * 100) + 'px';
+            sparkle.style.top = (y + (Math.random() - 0.5) * 100) + 'px';
+            document.body.appendChild(sparkle);
+            setTimeout(() => sparkle.remove(), 600);
+        }
+    }
+
+    function createBoomEffect(x, y) {
+        const boom = document.createElement('div');
+        boom.className = 'boom-effect';
+        boom.textContent = '💥';
+        boom.style.left = (x - 50) + 'px';
+        boom.style.top = (y - 50) + 'px';
+        document.body.appendChild(boom);
+        setTimeout(() => boom.remove(), 500);
+    }
+
+    function createConfetti() {
+        const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#fdcb6e', '#6c5ce7', '#a29bfe'];
+        for (let i = 0; i < 50; i++) {
+            setTimeout(() => {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti-piece';
+                confetti.style.left = Math.random() * window.innerWidth + 'px';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.animationDelay = (Math.random() * 0.5) + 's';
+                document.body.appendChild(confetti);
+                setTimeout(() => confetti.remove(), 3000);
+            }, i * 30);
+        }
+    }
+
+    function showSuccessPopup(message) {
+        const popup = document.createElement('div');
+        popup.className = 'success-popup';
+        popup.innerHTML = `✓ ${message}`;
+        document.body.appendChild(popup);
+        setTimeout(() => {
+            popup.classList.add('hide');
+            setTimeout(() => popup.remove(), 500);
+        }, 2500);
+    }
+
+    // Cartoon animation functions
+    function createCoinDrop(x, y) {
+        const coin = document.createElement('div');
+        coin.className = 'coin-drop';
+        coin.textContent = '💰';
+        coin.style.left = (x - 20) + 'px';
+        coin.style.top = (y - 100) + 'px';
+        document.body.appendChild(coin);
+        setTimeout(() => coin.remove(), 800);
+    }
+
+    function addCartoonEffect(element, animationType) {
+        if (!element) return;
+        element.classList.add(animationType);
+        element.addEventListener('animationend', () => {
+            element.classList.remove(animationType);
+        }, { once: true });
+    }
+
+    function createFloatingEmoji(emoji, x, y) {
+        const el = document.createElement('div');
+        el.textContent = emoji;
+        el.style.position = 'fixed';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.fontSize = '50px';
+        el.style.pointerEvents = 'none';
+        el.style.zIndex = '9999';
+        el.classList.add('zoom-in-bounce');
+        document.body.appendChild(el);
+        setTimeout(() => {
+            el.style.transition = 'all 1s ease-out';
+            el.style.transform = 'translateY(-100px)';
+            el.style.opacity = '0';
+            setTimeout(() => el.remove(), 1000);
+        }, 600);
+    }
+
     authSwitchBtn.addEventListener('click', (e) => {
         e.preventDefault();
         isLogin = !isLogin;
@@ -222,6 +317,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }).catch((error) => {
             console.error(error);
+            // If Firebase read failed, try loading local backup
+            try {
+                const localInv = localStorage.getItem('bs_inventory');
+                const localTx = localStorage.getItem('bs_transactions');
+                if (localInv) inventory = JSON.parse(localInv);
+                if (localTx) transactions = JSON.parse(localTx);
+                renderInventory();
+                renderReports();
+                renderCategoryOptions();
+            } catch (e) {
+                console.warn('Failed to load local backup', e);
+            }
         });
     }
 
@@ -338,16 +445,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Inventory Management ---
 
     function renderInventory(itemsToRender = inventory) {
-        inventoryTableBody.innerHTML = '';
-        
+        // Use DocumentFragment to minimize reflows when rendering many items
+        const fragment = document.createDocumentFragment();
         const isAdmin = currentAppUser && currentAppUser.role === 'Admin';
         const deleteStyle = isAdmin ? '' : 'display:none;';
 
-        itemsToRender.forEach((item, index) => {
-            // Find original index if filtered
+        itemsToRender.forEach((item) => {
             const originalIndex = inventory.indexOf(item);
             const row = document.createElement('tr');
-            
             row.innerHTML = `
                 <td>${originalIndex + 1}</td>
                 <td>${item.barcode || '-'}</td>
@@ -362,9 +467,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="delete-btn delete-item-btn" onclick="deleteItem(${originalIndex})" style="${deleteStyle}">Delete</button>
                 </td>
             `;
-            
-            inventoryTableBody.appendChild(row);
+            fragment.appendChild(row);
         });
+        inventoryTableBody.innerHTML = '';
+        inventoryTableBody.appendChild(fragment);
         updateBillingDatalist();
     }
 
@@ -376,6 +482,13 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         renderInventory(filtered);
     };
+
+    // Debounced event listeners for search inputs to improve responsiveness
+    const inventorySearchEl = document.getElementById('inventorySearch');
+    if (inventorySearchEl) {
+        inventorySearchEl.addEventListener('input', debounce(window.filterInventory, 200));
+    }
+
 
     window.exportInventory = function() {
         const headers = ['Barcode', 'Name', 'Quantity', 'MRP', 'Cost Price', 'Selling Price'];
@@ -393,6 +506,44 @@ document.addEventListener('DOMContentLoaded', () => {
         
         downloadCSV(csvContent, 'inventory.csv');
     };
+
+    // Import CSV handler (Inventory)
+    const importFileInput = document.getElementById('importInventoryFile');
+    if (importFileInput) {
+        importFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                const text = ev.target.result;
+                const lines = text.split(/\r?\n/).filter(l => l.trim());
+                if (lines.length <= 1) {
+                    alert('No data found in CSV');
+                    return;
+                }
+                const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                let added = 0;
+                for (let i = 1; i < lines.length; i++) {
+                    const cols = lines[i].split(',');
+                    if (cols.length < 2) continue;
+                    const barcode = cols[0].trim();
+                    const name = cols[1].replace(/^"|"$/g, '').trim();
+                    const quantity = parseInt(cols[2]) || 0;
+                    const mrp = parseFloat(cols[3]) || 0;
+                    const costPrice = parseFloat(cols[4]) || 0;
+                    const sellingPrice = parseFloat(cols[5]) || 0;
+                    if (!name) continue;
+                    inventory.push({ barcode, name, quantity, mrp, costPrice, sellingPrice });
+                    added++;
+                }
+                saveInventory();
+                renderInventory();
+                alert('Imported ' + added + ' items');
+                importFileInput.value = '';
+            };
+            reader.readAsText(file);
+        });
+    }
 
     inventoryForm.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -436,6 +587,13 @@ document.addEventListener('DOMContentLoaded', () => {
             saveInventory();
             renderInventory();
             inventoryForm.reset();
+            
+            // Cartoon animations
+            const formRect = inventoryForm.getBoundingClientRect();
+            createSparkles(formRect.left + formRect.width / 2, formRect.top + formRect.height / 2);
+            addCartoonEffect(inventoryForm, 'rubber-band');
+            createCoinDrop(formRect.left + formRect.width / 2, formRect.top + formRect.height / 2);
+            showSuccessPopup(editIndex === -1 ? 'Item Added!' : 'Item Updated!');
         }
     });
 
@@ -457,15 +615,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.deleteItem = function(index) {
         if(confirm('Are you sure you want to delete this item?')) {
+            // Cartoon deletion effects
+            createBoomEffect(window.innerWidth / 2, window.innerHeight / 2);
+            createFloatingEmoji('🗑️', window.innerWidth / 2 - 25, window.innerHeight / 2);
+            
             inventory.splice(index, 1);
             saveInventory();
             renderInventory();
+            
+            const invTable = document.querySelector('#inventory-table');
+            if (invTable) addCartoonEffect(invTable, 'wiggle');
+            showSuccessPopup('Item Deleted!');
         }
     };
 
     function saveInventory() {
         if (currentUser) {
             set(ref(db, `users/${currentUser.uid}/inventory`), inventory);
+        }
+        // Always keep a local backup for offline/fallback
+        try {
+            localStorage.setItem('bs_inventory', JSON.stringify(inventory));
+        } catch (e) {
+            console.warn('Local backup failed', e);
+        }
+    }
+
+    function saveTransactionsLocal() {
+        try {
+            localStorage.setItem('bs_transactions', JSON.stringify(transactions));
+        } catch (e) {
+            console.warn('Saving transactions locally failed', e);
         }
     }
 
@@ -495,6 +675,15 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('billItemSearch').placeholder = "Name or Barcode";
         }
     });
+
+    // Debounced billing search to reduce UI updates while typing
+    const billSearchEl = document.getElementById('billItemSearch');
+    if (billSearchEl) {
+        billSearchEl.addEventListener('input', debounce(() => {
+            // don't do heavy work here; we keep datalist updated
+            updateBillingDatalist();
+        }, 150));
+    }
 
     function updateBillingDatalist() {
         inventoryDatalist.innerHTML = '';
@@ -575,6 +764,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('billItemQuantity').value = 1;
                 document.getElementById('billItemDiscount').value = 0;
                 document.getElementById('billItemSearch').focus();
+                
+                // Cartoon animations for billing
+                createSparkles(window.innerWidth / 2, window.innerHeight / 3);
+                const billTable = document.querySelector('#billing-table');
+                if (billTable) addCartoonEffect(billTable, 'bounce');
+                createFloatingEmoji('🛒', window.innerWidth / 2 - 25, window.innerHeight / 3);
             } else {
                 alert(`Insufficient stock! Only ${item.quantity} available.`);
                 // If scanner mode, clear input anyway to prevent blocking
@@ -636,6 +831,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.removeFromBill = function(index) {
+        // Small boom and swing for removing item
+        const billTable = document.getElementById('billing-table');
+        if (billTable) {
+            const rect = billTable.getBoundingClientRect();
+            createBoomEffect(rect.left + rect.width / 2, rect.top + 100);
+            addCartoonEffect(billTable, 'swing');
+        }
         currentBill.splice(index, 1);
         renderBill();
     };
@@ -656,8 +858,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.clearCurrentBill = function() {
         if(currentBill.length > 0 && confirm('Clear current bill items?')) {
+            // Cartoon clear effects
+            createBoomEffect(window.innerWidth / 2, window.innerHeight / 2);
+            createFloatingEmoji('🧹', window.innerWidth / 2 - 25, window.innerHeight / 2);
+            
             currentBill = [];
             renderBill();
+            
+            const billSection = document.getElementById('billing-section');
+            if (billSection) addCartoonEffect(billSection, 'jello');
+            
             document.getElementById('amountReceived').value = '';
             document.getElementById('changeToReturn').value = '';
         }
@@ -681,7 +891,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const grandTotal = document.getElementById('billGrandTotal').textContent;
 
         if (confirm(`Generate Invoice for ${customerName}? Total: ₹${grandTotal}`)) {
-            // Update inventory
+            // Update inventory quantities
             currentBill.forEach(billItem => {
                 const inventoryItem = inventory.find(i => i.name === billItem.name);
                 if (inventoryItem) {
@@ -704,15 +914,53 @@ document.addEventListener('DOMContentLoaded', () => {
                 paymentMode
             };
             transactions.push(transaction);
+            
+            // Save both inventory and transactions to Firebase
             if (currentUser) {
-                set(ref(db, `users/${currentUser.uid}/transactions`), transactions);
+                set(ref(db, `users/${currentUser.uid}/inventory`), inventory)
+                    .then(() => {
+                        return set(ref(db, `users/${currentUser.uid}/transactions`), transactions);
+                    })
+                    .then(() => {
+                        console.log('Inventory and transactions saved successfully');
+                        renderInventory();
+                    })
+                    .catch(error => {
+                        console.error('Error saving to Firebase:', error);
+                        alert('Warning: Data may not have been saved to cloud. Please check your connection.');
+                        renderInventory();
+                    });
+            } else {
+                renderInventory();
             }
-
-            saveInventory();
-            renderInventory();
+            
+            // Always update local backup
+            saveTransactionsLocal();
+            try {
+                localStorage.setItem('bs_inventory', JSON.stringify(inventory));
+            } catch (e) {
+                console.warn('Local backup failed', e);
+            }
             
             // Generate Printable Invoice
             generateInvoiceHTML(transaction);
+            
+            // Checkout celebration with cartoon animations
+            createConfetti();
+            createFloatingEmoji('💰', window.innerWidth / 2 - 25, window.innerHeight / 2);
+            createFloatingEmoji('🎉', window.innerWidth / 2 + 25, window.innerHeight / 2);
+            createFloatingEmoji('✨', window.innerWidth / 2 - 50, window.innerHeight / 2 + 30);
+            showSuccessPopup('Sale Completed! ₹' + grandTotal);
+            const printBtn = document.getElementById('print-bill-btn');
+            if (printBtn) {
+                printBtn.classList.add('pulse-success');
+                addCartoonEffect(printBtn, 'heart-beat');
+            }
+            const billSection = document.getElementById('billing-section');
+            if (billSection) addCartoonEffect(billSection, 'tada');
+            setTimeout(() => {
+                if (printBtn) printBtn.classList.remove('pulse-success');
+            }, 800);
 
             // Reset Bill
             currentBill = [];
@@ -885,6 +1133,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if(salesMonthElement) salesMonthElement.textContent = salesMonth.toFixed(2);
         if(totalInventoryCostElement) totalInventoryCostElement.textContent = inventoryCost.toFixed(2);
 
+        // Render daily sales summary (default to today)
+        const dateInput = document.getElementById('dailyReportDate');
+        if (dateInput) {
+            // Set default value to today in YYYY-MM-DD for the date input
+            const today = new Date();
+            const pad = (n) => n.toString().padStart(2, '0');
+            dateInput.value = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+            // Render today's sales
+            renderDailySales(dateInput.value);
+        }
+
         // Render Category Sales
         const categorySalesTableBody = document.querySelector('#category-sales-table tbody');
         if (categorySalesTableBody) {
@@ -1038,6 +1297,87 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     }
+
+    // --- Daily Sales Report ---
+    // Accepts a date string in YYYY-MM-DD (from <input type="date">) or locale date string
+    window.getDailySales = function(dateStr) {
+        if (!dateStr) return { total: 0, transactions: [] };
+        // Normalize dateStr to locale date string used in transactions
+        let dt;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            dt = new Date(dateStr + 'T00:00:00');
+        } else {
+            dt = new Date(dateStr);
+        }
+        if (isNaN(dt.getTime())) return { total: 0, transactions: [] };
+        const localeDate = dt.toLocaleDateString();
+        const dailyTx = transactions.filter(t => t.date === localeDate);
+        const total = dailyTx.reduce((s, t) => s + (parseFloat(t.grandTotal) || 0), 0);
+        return { total, transactions: dailyTx };
+    };
+
+    window.renderDailySales = function(dateInputValue) {
+        const outTotalElId = 'dailySalesTotal';
+        const outTableId = 'daily-sales-table';
+
+        // Ensure UI elements exist; create them if first time
+        let container = document.getElementById('daily-sales-container');
+        if (!container) {
+            const reportsSection = document.querySelector('#reports-section .card');
+            container = document.createElement('div');
+            container.id = 'daily-sales-container';
+            container.className = 'card';
+            container.style.marginTop = '15px';
+            container.innerHTML = `
+                <h3>Daily Sales Details</h3>
+                <p style="margin:6px 0;">Date: <strong id="dailySalesDate"></strong></p>
+                <p style="margin:6px 0;">Total Sales: ₹<span id="dailySalesTotal">0.00</span></p>
+                <div class="table-responsive">
+                    <table id="daily-sales-table">
+                        <thead>
+                            <tr><th>Invoice</th><th>Customer</th><th>Amount</th><th>Items</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            `;
+            // Place it at the end of reports section
+            const reportsContainer = document.querySelector('#reports-section');
+            if (reportsContainer) {
+                reportsContainer.appendChild(container);
+            }
+        }
+
+        const parsed = window.getDailySales(dateInputValue);
+        // Update header values
+        const dateDisplayEl = document.getElementById('dailySalesDate');
+        const totalEl = document.getElementById('dailySalesTotal');
+        const tbody = document.querySelector('#daily-sales-table tbody');
+        let displayDate = dateInputValue;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateInputValue)) {
+            const d = new Date(dateInputValue + 'T00:00:00');
+            displayDate = d.toLocaleDateString();
+        }
+        if (dateDisplayEl) dateDisplayEl.textContent = displayDate;
+        if (totalEl) totalEl.textContent = (parsed.total || 0).toFixed(2);
+        if (tbody) {
+            tbody.innerHTML = '';
+            if (parsed.transactions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No transactions for this date</td></tr>';
+            } else {
+                parsed.transactions.forEach(t => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${t.invoiceNo}</td>
+                        <td>${t.customerName || '-'}</td>
+                        <td>₹${parseFloat(t.grandTotal).toFixed(2)}</td>
+                        <td>${(t.items || []).map(it => `${it.name} x${it.quantity}`).join(', ')}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+    };
 
     window.openReturnModal = function(invoiceNo) {
         const transaction = transactions.find(t => t.invoiceNo === invoiceNo);
@@ -1195,6 +1535,29 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.removeChild(link);
         }
     }
+
+    // Keyboard shortcuts: Ctrl+I -> focus item name, Ctrl+B -> focus billing search, Ctrl+Shift+C -> clear bill
+    document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'i') {
+            e.preventDefault();
+            const el = document.getElementById('itemName');
+            if (el) el.focus();
+        }
+        if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
+            e.preventDefault();
+            const el = document.getElementById('billItemSearch');
+            if (el) el.focus();
+        }
+        if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'c') {
+            e.preventDefault();
+            if (currentBill.length > 0) {
+                if (confirm('Clear current bill items?')) {
+                    currentBill = [];
+                    renderBill();
+                }
+            }
+        }
+    });
 
     // --- Settings Management ---
     function loadSettingsForm() {
