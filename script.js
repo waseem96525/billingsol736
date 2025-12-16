@@ -706,8 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     // Show low stock notification
                     setTimeout(() => {
-                        const threshold = settings.lowStockThreshold || 5;
-                        const lowStockCount = inventory.filter(i => parseInt(i.quantity) <= threshold).length;
+                        const lowStockCount = inventory.filter(i => isLowStockItem(i)).length;
                         if (lowStockCount > 0) {
                             showLowStockNotification();
                         }
@@ -981,8 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     renderReports();
                     // Show notification if there are low stock items
-                    const threshold = settings.lowStockThreshold || 5;
-                    const lowStockCount = inventory.filter(i => parseInt(i.quantity) <= threshold).length;
+                    const lowStockCount = inventory.filter(i => isLowStockItem(i)).length;
                     if (lowStockCount > 0) {
                         setTimeout(() => showLowStockNotification(), 500);
                     }
@@ -1010,16 +1008,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Inventory Management ---
 
+    function getEffectiveMinQty(item) {
+        const globalThreshold = settings.lowStockThreshold || 5;
+        const raw = item ? item.minQty : undefined;
+
+        // Treat explicit 0 as valid (means only out-of-stock triggers, no low-stock)
+        if (raw === 0) return 0;
+
+        const parsed = parseInt(raw);
+        if (!Number.isNaN(parsed)) return parsed;
+        return globalThreshold;
+    }
+
+    function getReorderQty(item) {
+        const qty = parseInt(item?.quantity) || 0;
+        const minQty = getEffectiveMinQty(item);
+        if (minQty <= 0) return 0;
+        return Math.max(0, minQty - qty);
+    }
+
+    function isLowStockItem(item) {
+        const qty = parseInt(item?.quantity) || 0;
+        if (qty === 0) return true;
+        const minQty = getEffectiveMinQty(item);
+        if (minQty <= 0) return false;
+        return qty > 0 && qty <= minQty;
+    }
+
     function renderInventory(itemsToRender = inventory) {
         // Use DocumentFragment to minimize reflows when rendering many items
         const fragment = document.createDocumentFragment();
         const isAdmin = currentAppUser && currentAppUser.role === 'Admin';
         const deleteStyle = isAdmin ? '' : 'display:none;';
-        const threshold = settings.lowStockThreshold || 5;
+        const globalThreshold = settings.lowStockThreshold || 5;
 
         itemsToRender.forEach((item) => {
             const originalIndex = inventory.indexOf(item);
             const qty = parseInt(item.quantity);
+
+            const hasCustomMin = item.minQty !== undefined && item.minQty !== null && item.minQty !== '' && !Number.isNaN(parseInt(item.minQty));
+            const effectiveMin = hasCustomMin ? parseInt(item.minQty) : globalThreshold;
             
             // Determine color based on stock level
             let qtyColor = '#2ecc71'; // Green - Good stock
@@ -1027,10 +1055,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (qty === 0) {
                 qtyColor = '#e74c3c'; // Red - Out of stock
                 qtyBg = '#f8d7da';
-            } else if (qty <= threshold) {
+            } else if (effectiveMin > 0 && qty <= effectiveMin) {
                 qtyColor = '#e74c3c'; // Red - Low stock
                 qtyBg = '#f8d7da';
-            } else if (qty <= threshold * 2) {
+            } else if (effectiveMin > 0 && qty <= effectiveMin * 2) {
                 qtyColor = '#f39c12'; // Yellow/Orange - Medium stock
                 qtyBg = '#fff3cd';
             }
@@ -1043,7 +1071,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${item.category || 'General'}</td>
                 <td style="background-color: ${qtyBg}; color: ${qtyColor}; font-weight: bold; text-align: center;">
                     ${item.quantity}
-                    ${qty === 0 ? ' <span style="font-size: 10px;">⚠️</span>' : qty <= threshold ? ' <span style="font-size: 10px;">🔔</span>' : ''}
+                    ${qty === 0 ? ' <span style="font-size: 10px;">⚠️</span>' : (effectiveMin > 0 && qty <= effectiveMin) ? ' <span style="font-size: 10px;">🔔</span>' : ''}
+                </td>
+                <td style="text-align:center; font-weight: ${hasCustomMin ? 'bold' : 'normal'}; color: ${hasCustomMin ? '#6c5ce7' : '#666'};">
+                    ${hasCustomMin ? effectiveMin : '-'}
                 </td>
                 <td>₹${item.mrp ? parseFloat(item.mrp).toFixed(2) : '-'}</td>
                 <td>₹${item.costPrice ? parseFloat(item.costPrice).toFixed(2) : '-'}</td>
@@ -1097,13 +1128,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     window.exportInventory = function() {
-        const headers = ['Barcode', 'Name', 'Quantity', 'MRP', 'Cost Price', 'Selling Price'];
+        const headers = ['Barcode', 'Name', 'Quantity', 'Min Qty', 'MRP', 'Cost Price', 'Selling Price'];
         const csvContent = [
             headers.join(','),
             ...inventory.map(item => [
                 item.barcode || '',
                 `"${item.name}"`,
                 item.quantity,
+                (item.minQty ?? ''),
                 item.mrp || 0,
                 item.costPrice || 0,
                 item.sellingPrice || 0
@@ -1135,11 +1167,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     const barcode = cols[0].trim();
                     const name = cols[1].replace(/^"|"$/g, '').trim();
                     const quantity = parseInt(cols[2]) || 0;
-                    const mrp = parseFloat(cols[3]) || 0;
-                    const costPrice = parseFloat(cols[4]) || 0;
-                    const sellingPrice = parseFloat(cols[5]) || 0;
+                    // Backward compatible CSV parsing:
+                    // Old format: Barcode,Name,Quantity,MRP,Cost,Selling
+                    // New format: Barcode,Name,Quantity,MinQty,MRP,Cost,Selling
+                    const possibleMin = cols[3];
+                    const minQty = (cols.length >= 7) ? (parseInt(possibleMin) || 0) : undefined;
+                    const mrp = parseFloat(cols.length >= 7 ? cols[4] : cols[3]) || 0;
+                    const costPrice = parseFloat(cols.length >= 7 ? cols[5] : cols[4]) || 0;
+                    const sellingPrice = parseFloat(cols.length >= 7 ? cols[6] : cols[5]) || 0;
                     if (!name) continue;
-                    inventory.push({ barcode, name, quantity, mrp, costPrice, sellingPrice });
+                    const item = { barcode, name, quantity, mrp, costPrice, sellingPrice };
+                    if (minQty !== undefined) item.minQty = minQty;
+                    inventory.push(item);
                     added++;
                 }
                 saveInventory();
@@ -1160,16 +1199,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = document.getElementById('itemName').value;
         const category = document.getElementById('itemCategory').value;
         const quantity = document.getElementById('itemQuantity').value;
+        const minQtyRaw = document.getElementById('itemMinQty')?.value;
         const mrp = document.getElementById('itemMRP').value;
         const costPrice = document.getElementById('itemCostPrice').value;
         const sellingPrice = document.getElementById('itemSellingPrice').value;
 
         if(name && quantity && sellingPrice) {
+            const parsedMinQty = minQtyRaw === '' || minQtyRaw === undefined ? null : (parseInt(minQtyRaw) || 0);
             const itemData = {
                 barcode,
                 name,
                 category,
                 quantity: parseInt(quantity),
+                minQty: parsedMinQty,
                 mrp: parseFloat(mrp),
                 costPrice: parseFloat(costPrice),
                 sellingPrice: parseFloat(sellingPrice)
@@ -1234,6 +1276,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('itemName').value = item.name;
         document.getElementById('itemCategory').value = item.category || 'General';
         document.getElementById('itemQuantity').value = item.quantity;
+        const minEl = document.getElementById('itemMinQty');
+        if (minEl) minEl.value = (item.minQty === null || item.minQty === undefined) ? '' : item.minQty;
         document.getElementById('itemMRP').value = item.mrp || '';
         document.getElementById('itemCostPrice').value = item.costPrice || '';
         document.getElementById('itemSellingPrice').value = item.sellingPrice || item.price || '';
@@ -1781,9 +1825,11 @@ document.addEventListener('DOMContentLoaded', () => {
             inventoryValue += (parseFloat(i.sellingPrice) || 0) * qty;
             stockCount += qty;
 
+            const effectiveMin = getEffectiveMinQty(i);
+
             if(qty === 0) {
                 outOfStockItems.push(i);
-            } else if(qty <= threshold) {
+            } else if(effectiveMin > 0 && qty <= effectiveMin) {
                 lowStockItems.push(i);
             }
         });
@@ -1855,13 +1901,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const allLowStock = [...outOfStockItems, ...lowStockItems];
             
             if(allLowStock.length === 0) {
-                lowStockTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #2ecc71; padding: 20px;">✅ All items are well stocked!</td></tr>';
+                lowStockTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: #2ecc71; padding: 20px;">✅ All items are well stocked!</td></tr>';
             } else {
                 // Sort by quantity (lowest first)
                 allLowStock.sort((a, b) => parseInt(a.quantity) - parseInt(b.quantity));
                 
                 allLowStock.forEach(item => {
                     const qty = parseInt(item.quantity);
+                    const minQty = getEffectiveMinQty(item);
+                    const reorderQty = getReorderQty(item);
                     const isOutOfStock = qty === 0;
                     const statusText = isOutOfStock ? 'OUT OF STOCK' : 'LOW STOCK';
                     const statusColor = isOutOfStock ? '#e74c3c' : '#f39c12';
@@ -1872,6 +1920,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td style="font-weight: bold;">${item.name}</td>
                         <td>${item.category || 'General'}</td>
                         <td style="text-align: center; font-weight: bold; color: ${statusColor};">${qty}</td>
+                        <td style="text-align:center;">${minQty > 0 ? minQty : '-'}</td>
+                        <td style="text-align:center; font-weight:bold; color:${reorderQty > 0 ? '#6c5ce7' : '#999'};">${reorderQty > 0 ? reorderQty : '-'}</td>
                         <td style="background-color: ${statusBg}; color: ${statusColor}; font-weight: bold; text-align: center; font-size: 11px;">
                             ${statusText}
                         </td>
@@ -1893,7 +1943,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const outMsg = outOfStockItems.length > 0 ? `${outOfStockItems.length} out of stock` : '';
                     const lowMsg = lowStockItems.length > 0 ? `${lowStockItems.length} low stock` : '';
                     const parts = [outMsg, lowMsg].filter(p => p);
-                    summaryEl.textContent = `⚠️ ${parts.join(', ')} - Threshold: ${threshold} units`;
+                    summaryEl.textContent = `⚠️ ${parts.join(', ')} - Min Qty: per-item (fallback ${threshold})`;
                     summaryEl.style.color = outOfStockItems.length > 0 ? '#e74c3c' : '#f39c12';
                     summaryEl.style.fontWeight = 'bold';
                 }
@@ -2334,8 +2384,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Low Stock Alert Functions ---
     function updateLowStockBadge() {
-        const threshold = settings.lowStockThreshold || 5;
-        const lowStockCount = inventory.filter(i => parseInt(i.quantity) <= threshold).length;
+        const lowStockCount = inventory.filter(i => isLowStockItem(i)).length;
         const badge = document.getElementById('low-stock-badge');
         
         if (badge) {
@@ -2349,9 +2398,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showLowStockNotification() {
-        const threshold = settings.lowStockThreshold || 5;
-        const lowStockItems = inventory.filter(i => parseInt(i.quantity) <= threshold && parseInt(i.quantity) > 0);
-        const outOfStockItems = inventory.filter(i => parseInt(i.quantity) === 0);
+        const lowStockItems = inventory.filter(i => {
+            const qty = parseInt(i.quantity) || 0;
+            const minQty = getEffectiveMinQty(i);
+            return qty > 0 && minQty > 0 && qty <= minQty;
+        });
+        const outOfStockItems = inventory.filter(i => (parseInt(i.quantity) || 0) === 0);
         
         // Remove any existing notification
         const existingNotification = document.querySelector('.low-stock-notification');
@@ -2376,7 +2428,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (lowStockItems.length > 0) {
                 message += `🟡 ${lowStockItems.length} item(s) LOW STOCK:\n`;
                 lowStockItems.slice(0, 3).forEach(item => {
-                    message += `  • ${item.name} (${item.quantity} left)\n`;
+                    const minQty = getEffectiveMinQty(item);
+                    const reorder = getReorderQty(item);
+                    message += `  • ${item.name} (${item.quantity} left, min ${minQty}, reorder ${reorder})\n`;
                 });
                 if (lowStockItems.length > 3) {
                     message += `  ... and ${lowStockItems.length - 3} more\n`;
@@ -2410,24 +2464,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.exportLowStock = function() {
-        const threshold = settings.lowStockThreshold || 5;
-        const lowStockItems = inventory.filter(i => parseInt(i.quantity) <= threshold);
+        const lowStockItems = inventory.filter(i => isLowStockItem(i));
         
         if (lowStockItems.length === 0) {
             alert('No low stock items to export.');
             return;
         }
         
-        const headers = ['Item Name', 'Category', 'Current Quantity', 'Selling Price', 'Status'];
+        const headers = ['Item Name', 'Category', 'Current Quantity', 'Min Qty', 'Reorder Suggest', 'Selling Price', 'Status'];
         const csvContent = [
             headers.join(','),
             ...lowStockItems.map(item => {
                 const qty = parseInt(item.quantity);
+                const minQty = getEffectiveMinQty(item);
+                const reorderQty = getReorderQty(item);
                 const status = qty === 0 ? 'OUT OF STOCK' : 'LOW STOCK';
                 return [
                     `"${item.name}"`,
                     item.category || 'General',
                     qty,
+                    minQty > 0 ? minQty : '',
+                    reorderQty > 0 ? reorderQty : '',
                     item.sellingPrice || 0,
                     status
                 ].join(',');
