@@ -40,6 +40,11 @@ body {
     padding: 0 20px;
 }
 
+/* Wider app canvas for POS-style Billing */
+#app-container {
+    max-width: 1200px;
+}
+
 h1 {
     text-align: center;
     color: var(--text);
@@ -341,10 +346,148 @@ tr:hover {
 }
 
 .delete-btn:hover {
-    background-color: #c0392b;
+    background-color: var(--danger-hover);
 }
 
 /* Animations */
+.billing-layout {
+    display: grid;
+    gap: 16px;
+}
+
+.billing-grid {
+    display: grid;
+    grid-template-columns: minmax(340px, 440px) 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+.billing-left,
+.billing-right {
+    min-width: 0;
+}
+
+#billing-section .card {
+    border: 1px solid var(--border);
+}
+
+#billing-section .table-responsive {
+    max-width: 100%;
+}
+
+.billing-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.billing-card-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.billing-quick-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.billing-mini-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+    line-height: 1;
+    border-radius: 10px;
+}
+
+.billing-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+}
+
+.billing-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+}
+
+.billing-toggle label {
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+}
+
+.billing-primary-btn {
+    font-weight: 800;
+}
+
+.billing-tax-input {
+    width: 70px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+}
+
+.billing-readonly-success {
+    background: var(--surface-2);
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-weight: 800;
+    color: var(--text);
+}
+
+#billing-table {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+#billing-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+}
+
+#billing-table tbody tr:nth-child(even) {
+    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.bill-footer {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+@media (max-width: 768px) {
+    .billing-card-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .billing-quick-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .billing-grid {
+        grid-template-columns: 1fr;
+    }
+}
 @keyframes sparkle {
     0%, 100% { opacity: 0; transform: scale(0) rotate(0deg); }
     50% { opacity: 1; transform: scale(1) rotate(180deg); }
