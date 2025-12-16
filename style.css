@@ -1,10 +1,37 @@
+:root {
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --surface-2: #f1f5f9;
+    --text: #0f172a;
+    --muted: #475569;
+    --border: #e2e8f0;
+
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+
+    --info: #0ea5e9;
+    --info-hover: #0284c7;
+
+    --success: #22c55e;
+    --success-hover: #16a34a;
+
+    --warning: #f59e0b;
+    --warning-hover: #d97706;
+
+    --danger: #f43f5e;
+    --danger-hover: #e11d48;
+
+    --secondary: #64748b;
+    --secondary-hover: #475569;
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     line-height: 1.6;
     margin: 0;
     padding: 0;
-    background-color: #f4f4f4;
-    color: #333;
+    background-color: var(--bg);
+    color: var(--text);
 }
 
 .container {
@@ -15,7 +42,7 @@ body {
 
 h1 {
     text-align: center;
-    color: #2c3e50;
+    color: var(--text);
 }
 
 .nav-buttons {
@@ -26,9 +53,9 @@ h1 {
 }
 
 .nav-btn {
-    background-color: #ecf0f1;
-    color: #2c3e50;
-    border: 1px solid #bdc3c7;
+    background-color: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     padding: 10px 20px;
     cursor: pointer;
     font-size: 16px;
@@ -37,26 +64,27 @@ h1 {
 }
 
 .nav-btn.active {
-    background-color: #3498db;
+    background-color: var(--primary);
     color: white;
-    border-color: #3498db;
+    border-color: var(--primary);
 }
 
 .nav-btn:hover:not(.active) {
-    background-color: #bdc3c7;
+    background-color: var(--border);
 }
 
 .card {
-    background: #fff;
+    background: var(--surface);
     padding: 20px;
     margin-bottom: 20px;
     border-radius: 5px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+    border: 1px solid var(--border);
 }
 
 h2, h3 {
     margin-top: 0;
-    border-bottom: 2px solid #eee;
+    border-bottom: 2px solid var(--border);
     padding-bottom: 10px;
 }
 
@@ -89,14 +117,16 @@ input[type="tel"],
 select {
     width: 100%;
     padding: 8px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--border);
     border-radius: 4px;
     box-sizing: border-box;
+    background: var(--surface);
+    color: var(--text);
 }
 
 button {
     display: inline-block;
-    background: #3498db;
+    background: var(--primary);
     color: #fff;
     padding: 10px 20px;
     border: none;
@@ -106,7 +136,7 @@ button {
 }
 
 button:hover {
-    background: #2980b9;
+    background: var(--primary-hover);
 }
 
 .table-responsive {
@@ -123,42 +153,42 @@ table {
 th, td {
     padding: 12px;
     text-align: left;
-    border-bottom: 1px solid #ddd;
+    border-bottom: 1px solid var(--border);
 }
 
 th {
-    background-color: #f8f9fa;
+    background-color: var(--surface-2);
     font-weight: bold;
 }
 
 tr:hover {
-    background-color: #f1f1f1;
+    background-color: var(--surface-2);
 }
 
 .edit-btn {
-    background-color: #f39c12;
+    background-color: var(--warning);
     padding: 5px 10px;
     font-size: 14px;
     margin-right: 5px;
 }
 
 .edit-btn:hover {
-    background-color: #d35400;
+    background-color: var(--warning-hover);
 }
 
 .delete-btn {
-    background-color: #e74c3c;
+    background-color: var(--danger);
     padding: 5px 10px;
     font-size: 14px;
 }
 
 .delete-btn:hover {
-    background-color: #c0392b;
+    background-color: var(--danger-hover);
 }
 
 .bill-footer {
     margin-top: 20px;
-    border-top: 2px solid #eee;
+    border-top: 2px solid var(--border);
     padding-top: 20px;
     display: flex;
     justify-content: space-between;
@@ -182,8 +212,8 @@ tr:hover {
 .grand-total {
     font-weight: bold;
     font-size: 20px;
-    color: #2c3e50;
-    border-top: 1px solid #ddd;
+    color: var(--text);
+    border-top: 1px solid var(--border);
     padding-top: 10px;
     margin-top: 10px;
 }
@@ -195,13 +225,13 @@ tr:hover {
 }
 
 .print-btn {
-    background-color: #27ae60;
+    background-color: var(--success);
     margin-top: 10px;
     width: 100%;
 }
 
 .print-btn:hover {
-    background-color: #219150;
+    background-color: var(--success-hover);
 }
 
 .stats-grid {
@@ -212,35 +242,35 @@ tr:hover {
 }
 
 .stat-card {
-    background: #f8f9fa;
+    background: var(--surface-2);
     padding: 20px;
     border-radius: 8px;
     text-align: center;
-    border: 1px solid #e9ecef;
+    border: 1px solid var(--border);
 }
 
 .stat-card h3 {
     margin: 0 0 10px 0;
     font-size: 16px;
-    color: #6c757d;
+    color: var(--muted);
     border-bottom: none;
 }
 
 .stat-value {
     font-size: 24px;
     font-weight: bold;
-    color: #2c3e50;
+    color: var(--text);
     margin: 0;
 }
 
 .view-btn {
-    background-color: #3498db;
+    background-color: var(--info);
     padding: 5px 10px;
     font-size: 14px;
 }
 
 .view-btn:hover {
-    background-color: #2980b9;
+    background-color: var(--info-hover);
 }
 
 .actions-row {
@@ -254,7 +284,7 @@ tr:hover {
 }
 
 .secondary-btn {
-    background-color: #95a5a6;
+    background-color: var(--secondary);
     color: white;
     padding: 8px 15px;
     border: none;
@@ -264,7 +294,7 @@ tr:hover {
 }
 
 .secondary-btn:hover {
-    background-color: #7f8c8d;
+    background-color: var(--secondary-hover);
 }
 
 /* Responsive Design */
@@ -593,4 +623,340 @@ button:not(:disabled):hover {
 
 .card:hover {
     animation: float 2s ease-in-out infinite;
+}
+
+/* Low Stock Alert Badge */
+.badge {
+    display: inline-block;
+    background-color: #e74c3c;
+    color: white;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
+    vertical-align: top;
+    min-width: 18px;
+    text-align: center;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { 
+        transform: scale(1); 
+        opacity: 1; 
+    }
+    50% { 
+        transform: scale(1.1); 
+        opacity: 0.9; 
+    }
+}
+
+/* Low Stock Notification Popup */
+.low-stock-notification {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    z-index: 10000;
+    max-width: 350px;
+    animation: slideInRight 0.5s ease-out;
+    border-left: 5px solid #fff;
+}
+
+.low-stock-notification strong {
+    display: block;
+    margin-bottom: 10px;
+}
+
+@media (max-width: 768px) {
+    .low-stock-notification {
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+}
+
+/* Barcode Label Preview Styles */
+.barcode-label-preview {
+    border: 1px solid #ddd;
+    padding: 10px;
+    background: #fff;
+    text-align: center;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.barcode-label-preview h4 {
+    margin: 5px 0;
+    font-size: 12px;
+    color: #2c3e50;
+}
+
+.barcode-label-preview svg,
+.barcode-label-preview canvas {
+    margin: 8px auto;
+    display: block;
+}
+
+#barcode-selection-list label {
+    cursor: pointer;
+    padding: 5px;
+    transition: background-color 0.2s;
+}
+
+#barcode-selection-list label:hover {
+    background-color: #f0f0f0;
+    border-radius: 3px;
+}
+
+/* Shake animation for failed login */
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+    20%, 40%, 60%, 80% { transform: translateX(10px); }
+}
+
+/* Modal backdrop styling */
+.modal {
+    position: fixed;
+    z-index: 10000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.5);
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.modal .modal-content {
+    background-color: #fefefe;
+    margin: 10% auto;
+    padding: 30px;
+    border: 1px solid #888;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    animation: slideDown 0.3s;
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Role Selection Button Hover Effects */
+#role-selection-container button:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+#role-selection-container button:active {
+    transform: translateY(-2px);
+}
+
+/* Calculator Widget Styles */
+.calc-btn {
+    padding: 15px;
+    font-size: 18px;
+    border: 1px solid #bdc3c7;
+    background: white;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.calc-btn:hover {
+    background: #ecf0f1;
+}
+
+.calc-btn:active {
+    transform: scale(0.95);
+}
+
+.calc-btn.operator {
+    background: #3498db;
+    color: white;
+}
+
+.calc-btn.clear {
+    background: #e74c3c;
+    color: white;
+}
+
+.calc-btn.equal {
+    background: #27ae60;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+/* Dark Mode Styles */
+body.dark-mode {
+    background-color: #1a1a1a;
+    color: #e0e0e0;
+}
+
+body.dark-mode .card {
+    background: #2d2d2d;
+    border-color: #404040;
+    color: #e0e0e0;
+}
+
+body.dark-mode table {
+    color: #e0e0e0;
+}
+
+body.dark-mode th {
+    background-color: #404040;
+    color: #fff;
+}
+
+body.dark-mode tr:nth-child(even) {
+    background-color: #353535;
+}
+
+body.dark-mode tr:hover {
+    background-color: #404040;
+}
+
+body.dark-mode input,
+body.dark-mode select,
+body.dark-mode textarea {
+    background-color: #353535;
+    color: #e0e0e0;
+    border-color: #555;
+}
+
+body.dark-mode button {
+    background-color: #404040;
+    color: #e0e0e0;
+    border-color: #555;
+}
+
+body.dark-mode .nav-btn {
+    background-color: #353535;
+    color: #e0e0e0;
+}
+
+body.dark-mode .nav-btn.active {
+    background-color: var(--primary);
+    color: white;
+}
+
+body.dark-mode h1,
+body.dark-mode h2,
+body.dark-mode h3 {
+    color: #f0f0f0;
+}
+
+body.dark-mode #calculator-widget {
+    background: #2d2d2d;
+    border-color: var(--primary);
+}
+
+body.dark-mode .calc-btn {
+    background: #404040;
+    color: #e0e0e0;
+    border-color: #555;
+}
+
+/* Thermal Printer Support (58mm/80mm) */
+@media print {
+    * {
+        margin: 0;
+        padding: 0;
+        box-shadow: none !important;
+    }
+    
+    body {
+        width: 80mm;
+        font-size: 10pt;
+        font-family: 'Courier New', monospace;
+    }
+    
+    /* Hide non-printable elements */
+    nav, .tab-btn, button, input, .form-actions, #shortcuts-help, #calculator-widget, #dark-mode-toggle {
+        display: none !important;
+    }
+    
+    /* Bill print layout */
+    #inventory-section,
+    #reports-section,
+    #settings-section {
+        display: none !important;
+    }
+
+    #billing-section {
+        display: block !important;
+    }
+    
+    #billing-table {
+        width: 100%;
+        font-size: 9pt;
+        border-collapse: collapse;
+    }
+    
+    #billing-table th,
+    #billing-table td {
+        padding: 2px 4px;
+        border-bottom: 1px dashed #000;
+        text-align: left;
+    }
+    
+    #billing-table th {
+        font-weight: bold;
+        border-bottom: 2px solid #000;
+    }
+    
+    /* Store header */
+    .print-header {
+        text-align: center;
+        margin-bottom: 10px;
+        border-bottom: 2px solid #000;
+        padding-bottom: 5px;
+    }
+    
+    .print-header h2 {
+        margin: 0;
+        font-size: 14pt;
+    }
+    
+    /* Bill totals */
+    .bill-totals {
+        margin-top: 10px;
+        padding-top: 5px;
+        border-top: 2px solid #000;
+        font-weight: bold;
+    }
+    
+    /* Footer */
+    .print-footer {
+        margin-top: 10px;
+        padding-top: 5px;
+        border-top: 1px dashed #000;
+        text-align: center;
+        font-size: 8pt;
+    }
+    
+    /* For 58mm thermal printers */
+    @page {
+        size: 58mm auto;
+        margin: 2mm;
+    }
 }

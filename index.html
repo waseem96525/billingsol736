@@ -3,11 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Complete offline-capable retail billing and inventory management system">
+    <meta name="theme-color" content="#3498db">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Billing App">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:,">
     <title>Inventory Management App</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 </head>
 <body>
+    <!-- Offline Indicator -->
+    <div id="offline-indicator" style="display: none; position: fixed; top: 0; left: 0; right: 0; background: #e74c3c; color: white; padding: 10px; text-align: center; z-index: 10001; font-weight: bold;">
+        ⚠️ You are offline. Changes will sync when connection is restored.
+        <button onclick="manualSync()" style="margin-left: 15px; padding: 5px 10px; background: white; color: #e74c3c; border: none; border-radius: 3px; cursor: pointer; font-weight: bold;">Sync Now</button>
+    </div>
+    
     <div id="auth-container" class="container" style="max-width: 400px; margin-top: 100px;">
         <h1 style="text-align: center;">Login</h1>
         <div class="card">
@@ -34,17 +49,24 @@
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
                 <h1>Retail Billing App</h1>
-                <p id="current-user-display" style="font-size: 14px; color: #666; margin-top: -10px;">Logged in as: <span id="loggedInStaffName"></span></p>
+                <p id="current-user-display" style="font-size: 14px; color: #666; margin-top: -10px;">
+                    Logged in as: <span id="loggedInStaffName"></span>
+                    <span id="sync-status" style="margin-left: 10px; font-size: 12px; padding: 2px 8px; border-radius: 3px; background: #2ecc71; color: white;">● Synced</span>
+                </p>
             </div>
             <div style="display: flex; gap: 10px;">
+                <button id="dark-mode-toggle" onclick="toggleDarkMode()" style="padding: 5px 10px; font-size: 14px; background: #34495e; color: white; border: none; border-radius: 4px; cursor: pointer;">🌙 Dark</button>
                 <button id="full-logout-btn" class="delete-btn" style="padding: 5px 10px; font-size: 14px;">Logout</button>
             </div>
         </div>
         
         <div class="nav-buttons">
-            <button id="nav-inventory" class="nav-btn active" onclick="switchTab('inventory')">Inventory</button>
+            <button id="nav-inventory" class="nav-btn" onclick="switchTab('inventory')">Inventory</button>
             <button id="nav-billing" class="nav-btn" onclick="switchTab('billing')">Billing</button>
-            <button id="nav-reports" class="nav-btn" onclick="switchTab('reports')">Reports</button>
+            <button id="nav-reports" class="nav-btn" onclick="switchTab('reports')">
+                Reports
+                <span id="low-stock-badge" class="badge" style="display: none;">0</span>
+            </button>
             <button id="nav-settings" class="nav-btn" onclick="switchTab('settings')">Settings</button>
         </div>
 
@@ -56,6 +78,11 @@
                         <button class="secondary-btn" onclick="exportInventory()">Export CSV</button>
                         <button class="secondary-btn" onclick="document.getElementById('importInventoryFile').click()">Import CSV</button>
                         <input type="file" id="importInventoryFile" accept=".csv" style="display:none" />
+                </div>
+                <div class="actions-row" style="margin-top: 10px;">
+                        <button class="secondary-btn" onclick="generateMissingBarcodes()" style="background-color: #9b59b6;">🔢 Generate Missing Barcodes</button>
+                        <button class="secondary-btn" onclick="openBulkBarcodePrint()" style="background-color: #16a085;">🖨️ Bulk Print Barcodes</button>
+                        <button class="secondary-btn" onclick="openBulkQRPrint()" style="background-color: #e67e22;">📱 Bulk Print QR Codes</button>
                 </div>
             </div>
 
@@ -96,9 +123,16 @@
                         <label for="itemCostPrice">Cost Price (₹)</label>
                         <input type="number" id="itemCostPrice" required min="0" step="0.01">
                     </div>
+                </div>
+                <div class="form-row">
                     <div class="form-group">
                         <label for="itemSellingPrice">Selling Price (₹)</label>
                         <input type="number" id="itemSellingPrice" required min="0" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="itemImage">Item Image</label>
+                        <input type="file" id="itemImage" accept="image/*" style="padding: 5px;">
+                        <small style="color: #666; font-size: 11px;">Optional: Upload product image</small>
                     </div>
                 </div>
                 <button type="submit">Add Item</button>
@@ -119,6 +153,7 @@
                             <th>MRP (₹)</th>
                             <th>Cost (₹)</th>
                             <th>Selling (₹)</th>
+                            <th>Code</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -154,7 +189,9 @@
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <h2 style="margin: 0;">Add Item to Bill</h2>
-                    <div style="display: flex; align-items: center; gap: 5px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button type="button" onclick="toggleCalculator()" class="secondary-btn" style="padding: 5px 10px; font-size: 12px;">🧮 Calculator</button>
+                        <button type="button" onclick="startVoiceSearch()" class="secondary-btn" style="padding: 5px 10px; font-size: 12px;">🎤 Voice</button>
                         <input type="checkbox" id="scannerMode" style="width: 18px; height: 18px;">
                         <label for="scannerMode" style="font-weight: bold; cursor: pointer;">Scanner Mode</label>
                     </div>
@@ -346,13 +383,20 @@
                 </div>
 
                 <div class="card" style="flex: 1; min-width: 300px; margin-bottom: 0;">
-                    <h2>Low Stock Alerts</h2>
-                    <div class="table-responsive" style="max-height: 150px; overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h2 style="margin: 0;">Low Stock Alerts 🔔</h2>
+                        <button class="secondary-btn" onclick="exportLowStock()" style="font-size: 12px; padding: 5px 10px;">Export</button>
+                    </div>
+                    <p id="low-stock-summary" style="margin: 10px 0; font-size: 14px; color: #666;"></p>
+                    <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
                         <table id="low-stock-table" style="margin-top: 0;">
                             <thead>
                                 <tr>
                                     <th>Item</th>
-                                    <th>Qty</th>
+                                    <th>Category</th>
+                                    <th>Current</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -400,17 +444,29 @@
                         <div class="form-group">
                             <label for="userRole">Role</label>
                             <select id="userRole" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                                <option value="Staff">Staff</option>
-                                <option value="Admin">Admin</option>
+                                <option value="Cashier">Cashier (Billing Only)</option>
+                                <option value="Manager">Manager (Reports + Inventory)</option>
+                                <option value="Owner">Owner (Full Access)</option>
+                                <option value="Admin">Admin (Full Access)</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="userPin">PIN (4-digit)</label>
-                            <input type="text" id="userPin" required placeholder="1234" maxlength="4" pattern="\d{4}">
+                            <label for="userPin">PIN (4+ digits)</label>
+                            <input type="password" id="userPin" required placeholder="Enter secure PIN" minlength="4" pattern="\d+">
+                            <small style="color: #666; font-size: 11px;">🔒 PINs are securely hashed and cannot be recovered</small>
                         </div>
                     </div>
                     <button type="submit">Add User</button>
                 </form>
+                <div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-left: 3px solid #3498db; font-size: 12px;">
+                    <strong>🛡️ Security Notes:</strong>
+                    <ul style="margin: 5px 0; padding-left: 20px;">
+                        <li>Only Owner/Admin can manage users</li>
+                        <li>PINs are hashed for security (not stored in plain text)</li>
+                        <li>Default Owner PIN: <code>0000</code></li>
+                        <li>Cannot delete yourself or the last Owner</li>
+                    </ul>
+                </div>
                 <div class="table-responsive" style="margin-top: 15px;">
                     <table id="users-table">
                         <thead>
@@ -445,13 +501,51 @@
                         <label for="defaultTax">Default Tax Rate (%)</label>
                         <input type="number" id="defaultTax" min="0" step="0.01" value="0">
                     </div>
+                    <div class="form-group">
+                        <label for="lowStockThreshold">Low Stock Alert Threshold</label>
+                        <input type="number" id="lowStockThreshold" min="1" value="5" placeholder="Alert when quantity below...">
+                        <small style="color: #666; font-size: 12px;">You'll be notified when item quantity falls below this value</small>
+                    </div>
                     <button type="submit">Save Settings</button>
                 </form>
             </div>
             
             <div class="card">
                 <h2>Data Management</h2>
-                <button class="delete-btn" onclick="clearAllData()" style="width: 100%;">Clear All Data (Factory Reset)</button>
+                <div style="display: grid; gap: 10px;">
+                    <button class="secondary-btn" onclick="backupDatabase()" style="width: 100%; background: #27ae60;">📦 Backup Database</button>
+                    <button class="secondary-btn" onclick="document.getElementById('restoreFileInput').click()" style="width: 100%; background: #2980b9;">📥 Restore Database</button>
+                    <input type="file" id="restoreFileInput" accept=".json" style="display:none" onchange="restoreDatabase(event)" />
+                    <button class="delete-btn" onclick="clearAllData()" style="width: 100%;">🗑️ Clear All Data (Factory Reset)</button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Activity Logs 📋</h2>
+                <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+                    <label>Filter by User:
+                        <select id="activityLogFilter" onchange="renderActivityLogs()" style="padding: 5px;">
+                            <option value="all">All Users</option>
+                        </select>
+                    </label>
+                    <button class="secondary-btn" onclick="exportActivityLogs()">Export CSV</button>
+                    <button class="delete-btn" onclick="clearActivityLogs()" style="padding: 5px 10px;">Clear Logs</button>
+                </div>
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table id="activity-logs-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Activity logs will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -479,6 +573,77 @@
                 <h3>Total Refund: ₹<span id="returnTotalAmount">0.00</span></h3>
                 <button onclick="processReturn()" class="delete-btn" style="background-color: #e74c3c;">Process Refund</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Barcode/QR Code Print Modal -->
+    <div id="barcode-modal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
+        <div class="modal-content" style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 95%; max-width: 900px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); max-height: 85vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;" id="barcode-modal-title">Print Barcodes</h2>
+                <span class="close" onclick="closeBarcodeModal()" style="color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+            </div>
+            
+            <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <label style="margin: 0;">
+                    <input type="checkbox" id="selectAllBarcodes" onchange="toggleAllBarcodes()"> Select All
+                </label>
+                <label style="margin: 0; margin-left: 20px;">Copies per item: 
+                    <input type="number" id="barcodeCopies" min="1" value="1" style="width: 60px; padding: 4px;">
+                </label>
+                <button onclick="printSelectedBarcodes()" style="padding: 8px 20px; background-color: #27ae60; margin-left: auto;">🖨️ Print Selected</button>
+            </div>
+            
+            <div id="barcode-selection-list" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 20px; background: #f9f9f9;">
+                <!-- Checkboxes for items will be populated here -->
+            </div>
+            
+            <div id="barcode-preview-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; padding: 20px; background: white; border: 1px solid #ddd;">
+                <!-- Barcodes/QR codes will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Calculator Widget -->
+    <div id="calculator-widget" style="display: none; position: fixed; top: 100px; right: 20px; background: white; border: 2px solid #3498db; border-radius: 8px; padding: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 9999; width: 250px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 16px;">🧮 Calculator</h3>
+            <button onclick="toggleCalculator()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #e74c3c;">&times;</button>
+        </div>
+        <input type="text" id="calc-display" readonly style="width: 100%; padding: 10px; font-size: 20px; text-align: right; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; background: #ecf0f1;">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;">
+            <button onclick="calcInput('7')" class="calc-btn">7</button>
+            <button onclick="calcInput('8')" class="calc-btn">8</button>
+            <button onclick="calcInput('9')" class="calc-btn">9</button>
+            <button onclick="calcInput('/')" class="calc-btn operator">/</button>
+            <button onclick="calcInput('4')" class="calc-btn">4</button>
+            <button onclick="calcInput('5')" class="calc-btn">5</button>
+            <button onclick="calcInput('6')" class="calc-btn">6</button>
+            <button onclick="calcInput('*')" class="calc-btn operator">×</button>
+            <button onclick="calcInput('1')" class="calc-btn">1</button>
+            <button onclick="calcInput('2')" class="calc-btn">2</button>
+            <button onclick="calcInput('3')" class="calc-btn">3</button>
+            <button onclick="calcInput('-')" class="calc-btn operator">-</button>
+            <button onclick="calcInput('0')" class="calc-btn">0</button>
+            <button onclick="calcInput('.')" class="calc-btn">.</button>
+            <button onclick="calcClear()" class="calc-btn clear">C</button>
+            <button onclick="calcInput('+')" class="calc-btn operator">+</button>
+            <button onclick="calcEqual()" class="calc-btn equal" style="grid-column: span 4;">=</button>
+        </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Help -->
+    <div id="shortcuts-help" style="display: none; position: fixed; bottom: 20px; right: 20px; background: rgba(0,0,0,0.9); color: white; padding: 15px; border-radius: 8px; font-size: 12px; z-index: 9998; max-width: 300px;">
+        <div style="font-weight: bold; margin-bottom: 10px; font-size: 14px;">⌨️ Keyboard Shortcuts</div>
+        <div style="line-height: 1.8;">
+            <strong>F2:</strong> New Bill (Clear Current)<br>
+            <strong>F3:</strong> Search Inventory<br>
+            <strong>F4:</strong> Add to Bill Focus<br>
+            <strong>F5:</strong> Refresh Page<br>
+            <strong>F9:</strong> Toggle Calculator<br>
+            <strong>Ctrl+P:</strong> Print Invoice<br>
+            <strong>Ctrl+S:</strong> Save/Add Item<br>
+            <strong>Ctrl+?:</strong> Toggle This Help
         </div>
     </div>
 

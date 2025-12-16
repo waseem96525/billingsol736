@@ -21,6 +21,112 @@ const db = getDatabase(app);
 const auth = getAuth(app);
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Register Service Worker for Offline Support
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('service-worker.js')
+            .then(registration => {
+                console.log('Service Worker registered:', registration);
+                
+                // Listen for updates
+                registration.addEventListener('updatefound', () => {
+                    console.log('Service Worker update found');
+                });
+            })
+            .catch(error => {
+                console.log('Service Worker registration failed:', error);
+            });
+        
+        // Listen for sync messages from service worker
+        navigator.serviceWorker.addEventListener('message', event => {
+            if (event.data.type === 'SYNC_REQUIRED') {
+                syncPendingChanges();
+            }
+        });
+    }
+    
+    // Offline/Online Detection
+    const offlineIndicator = document.getElementById('offline-indicator');
+    let isOnline = navigator.onLine;
+    
+    // Offline Sync Queue (declare early before use)
+    let syncQueue = [];
+    let lastSyncTime = null;
+    
+    // Load sync queue from localStorage
+    function loadSyncQueue() {
+        try {
+            const saved = localStorage.getItem('bs_sync_queue');
+            if (saved) {
+                syncQueue = JSON.parse(saved);
+            }
+        } catch (e) {
+            console.warn('Failed to load sync queue:', e);
+        }
+    }
+    
+    function saveSyncQueue() {
+        try {
+            localStorage.setItem('bs_sync_queue', JSON.stringify(syncQueue));
+        } catch (e) {
+            console.warn('Failed to save sync queue:', e);
+        }
+    }
+    
+    // Load sync queue immediately
+    loadSyncQueue();
+    
+    function updateOnlineStatus() {
+        isOnline = navigator.onLine;
+        if (offlineIndicator) {
+            offlineIndicator.style.display = isOnline ? 'none' : 'block';
+        }
+        
+        updateSyncStatus();
+        
+        if (isOnline) {
+            console.log('Connection restored');
+            syncPendingChanges();
+        } else {
+            console.log('Connection lost - working offline');
+        }
+    }
+    
+    function updateSyncStatus() {
+        const syncStatus = document.getElementById('sync-status');
+        if (!syncStatus) return;
+        
+        if (!navigator.onLine) {
+            syncStatus.textContent = '● Offline';
+            syncStatus.style.background = '#e74c3c';
+        } else if (syncQueue.length > 0) {
+            syncStatus.textContent = `● Pending (${syncQueue.length})`;
+            syncStatus.style.background = '#f39c12';
+        } else {
+            syncStatus.textContent = '● Synced';
+            syncStatus.style.background = '#2ecc71';
+        }
+    }
+    
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    // Delay initial call until after all variables are initialized
+    setTimeout(() => updateOnlineStatus(), 100);
+    
+    // PWA Install Prompt
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        
+        // Show install button/prompt (optional)
+        console.log('PWA install available');
+    });
+    
+    window.addEventListener('appinstalled', () => {
+        console.log('PWA installed successfully');
+        deferredPrompt = null;
+    });
+    
     // Auth Elements
     const authContainer = document.getElementById('auth-container');
     const appContainer = document.getElementById('app-container');
@@ -52,13 +158,203 @@ document.addEventListener('DOMContentLoaded', () => {
         storeName: 'My Retail Store',
         storeAddress: '',
         storePhone: '',
-        defaultTax: 0
+        defaultTax: 0,
+        lowStockThreshold: 5
     };
     let categories = ['General', 'Grocery', 'Electronics', 'Clothing', 'Pharmacy', 'Other'];
-    let appUsers = [{name: 'Owner', role: 'Admin', pin: '0000'}];
+    // Default Owner with hashed PIN (original PIN: 0000)
+    let appUsers = [{name: 'Owner', role: 'Owner', pin: 'ry89yk'}];
     let currentAppUser = null;
     let currentBill = [];
     let editIndex = -1;
+    let activityLogs = [];
+    
+    // Sync queue functions (declarations moved earlier)
+    function addToSyncQueue(operation, data) {
+        syncQueue.push({
+            id: Date.now() + Math.random(),
+            operation,
+            data,
+            timestamp: new Date().toISOString()
+        });
+        saveSyncQueue();
+        updateSyncStatus();
+    }
+    
+    function syncPendingChanges() {
+        if (!navigator.onLine || !currentUser || syncQueue.length === 0) {
+            return;
+        }
+        
+        console.log(`Syncing ${syncQueue.length} pending changes...`);
+        
+        // Process queue
+        const itemsToSync = [...syncQueue];
+        syncQueue = [];
+        saveSyncQueue();
+        updateSyncStatus();
+        
+        // Sync to Firebase
+        itemsToSync.forEach(item => {
+            try {
+                switch (item.operation) {
+                    case 'inventory':
+                        set(ref(db, `users/${currentUser.uid}/inventory`), item.data);
+                        break;
+                    case 'transactions':
+                        set(ref(db, `users/${currentUser.uid}/transactions`), item.data);
+                        break;
+                    case 'settings':
+                        set(ref(db, `users/${currentUser.uid}/settings`), item.data);
+                        break;
+                    case 'categories':
+                        set(ref(db, `users/${currentUser.uid}/categories`), item.data);
+                        break;
+                    case 'appUsers':
+                        set(ref(db, `users/${currentUser.uid}/appUsers`), item.data);
+                        break;
+                    case 'activityLogs':
+                        set(ref(db, `users/${currentUser.uid}/activityLogs`), item.data);
+                        break;
+                }
+            } catch (error) {
+                console.error('Sync error:', error);
+                // Add back to queue if failed
+                syncQueue.push(item);
+            }
+        });
+        
+        saveSyncQueue();
+        updateSyncStatus();
+        lastSyncTime = new Date();
+        if (syncQueue.length === 0) {
+            showSuccessPopup('✓ Data synced successfully!');
+        }
+    }
+    
+    window.manualSync = function() {
+        if (!navigator.onLine) {
+            alert('No internet connection. Please check your network.');
+            return;
+        }
+        syncPendingChanges();
+    };
+    
+    // --- Activity Logging ---
+    function logActivity(action, details = '') {
+        if (!currentAppUser) return;
+        
+        const log = {
+            timestamp: new Date().toISOString(),
+            user: currentAppUser.name,
+            role: currentAppUser.role,
+            action: action,
+            details: details
+        };
+        
+        activityLogs.unshift(log); // Add to beginning
+        
+        // Keep only last 500 logs to prevent memory issues
+        if (activityLogs.length > 500) {
+            activityLogs = activityLogs.slice(0, 500);
+        }
+        
+        // Save to localStorage
+        try {
+            localStorage.setItem('bs_activity_logs', JSON.stringify(activityLogs));
+        } catch (e) {
+            console.warn('Failed to save activity logs:', e);
+        }
+        
+        // Sync to Firebase if online
+        if (currentUser && navigator.onLine) {
+            set(ref(db, `users/${currentUser.uid}/activityLogs`), activityLogs)
+                .catch(() => addToSyncQueue('activityLogs', activityLogs));
+        } else if (currentUser) {
+            addToSyncQueue('activityLogs', activityLogs);
+        }
+    }
+    
+    window.renderActivityLogs = function() {
+        const tbody = document.querySelector('#activity-logs-table tbody');
+        if (!tbody) return;
+        
+        const filter = document.getElementById('activityLogFilter')?.value || 'all';
+        const filteredLogs = filter === 'all' 
+            ? activityLogs 
+            : activityLogs.filter(log => log.user === filter);
+        
+        tbody.innerHTML = '';
+        
+        if (filteredLogs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #999;">No activity logs</td></tr>';
+            return;
+        }
+        
+        filteredLogs.slice(0, 100).forEach(log => {
+            const row = document.createElement('tr');
+            const date = new Date(log.timestamp);
+            row.innerHTML = `
+                <td>${date.toLocaleString()}</td>
+                <td><strong>${log.user}</strong> <span style="font-size: 11px; color: #666;">(${log.role})</span></td>
+                <td>${log.action}</td>
+                <td style="font-size: 12px;">${log.details}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    };
+    
+    function updateActivityLogFilter() {
+        const filter = document.getElementById('activityLogFilter');
+        if (!filter) return;
+        
+        filter.innerHTML = '<option value="all">All Users</option>';
+        const uniqueUsers = [...new Set(activityLogs.map(log => log.user))];
+        uniqueUsers.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user;
+            option.textContent = user;
+            filter.appendChild(option);
+        });
+    }
+    
+    window.exportActivityLogs = function() {
+        if (activityLogs.length === 0) {
+            alert('No activity logs to export.');
+            return;
+        }
+        
+        const headers = ['Timestamp', 'User', 'Role', 'Action', 'Details'];
+        const csvContent = [
+            headers.join(','),
+            ...activityLogs.map(log => [
+                log.timestamp,
+                `"${log.user}"`,
+                log.role,
+                `"${log.action}"`,
+                `"${log.details}"`
+            ].join(','))
+        ].join('\n');
+        
+        downloadCSV(csvContent, 'activity_logs.csv');
+    };
+    
+    window.clearActivityLogs = function() {
+        if (!currentAppUser || (currentAppUser.role !== 'Owner' && currentAppUser.role !== 'Admin')) {
+            alert('Access Denied: Only Owner/Admin can clear logs.');
+            return;
+        }
+        
+        if (confirm('Are you sure you want to clear all activity logs?')) {
+            activityLogs = [];
+            localStorage.setItem('bs_activity_logs', JSON.stringify(activityLogs));
+            if (currentUser) {
+                set(ref(db, `users/${currentUser.uid}/activityLogs`), []);
+            }
+            renderActivityLogs();
+            logActivity('SYSTEM', 'Activity logs cleared');
+        }
+    };
 
     // --- Auth Logic ---
     // Utility: debounce
@@ -241,6 +537,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Full Logout (Sign out from Firebase)
     document.getElementById('full-logout-btn').addEventListener('click', () => {
+        if (currentAppUser) {
+            logActivity('Logout', `User logged out`);
+        }
         signOut(auth).then(() => {
             location.reload();
         }).catch((error) => {
@@ -248,88 +547,194 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    function getActiveTabName() {
+        const activeBtn = document.querySelector('.nav-btn.active');
+        if (!activeBtn || !activeBtn.id) return null;
+        return activeBtn.id.startsWith('nav-') ? activeBtn.id.slice(4) : null;
+    }
+
     function applyPermissions() {
-        const isAdmin = currentAppUser.role === 'Admin';
+        if (!currentAppUser) return;
         
-        // Inventory Tab & Delete Buttons
+        const role = currentAppUser.role;
+        const isOwnerOrAdmin = role === 'Owner' || role === 'Admin';
+        const isManager = role === 'Manager';
+        const isCashier = role === 'Cashier';
+        
+        // Tab visibility based on roles:
+        // Cashier: Billing only
+        // Manager: Billing + Reports + Inventory
+        // Owner/Admin: All tabs
+        
         const inventoryTab = document.getElementById('nav-inventory');
+        const billingTab = document.getElementById('nav-billing');
+        const reportsTab = document.getElementById('nav-reports');
+        const settingsTab = document.getElementById('nav-settings');
+        
         if (inventoryTab) {
-            inventoryTab.style.display = isAdmin ? 'inline-block' : 'none';
+            inventoryTab.style.display = (isOwnerOrAdmin || isManager) ? 'inline-block' : 'none';
+        }
+        if (billingTab) {
+            billingTab.style.display = 'inline-block'; // All roles can access billing
+        }
+        if (reportsTab) {
+            reportsTab.style.display = (isOwnerOrAdmin || isManager) ? 'inline-block' : 'none';
+        }
+        if (settingsTab) {
+            settingsTab.style.display = isOwnerOrAdmin ? 'inline-block' : 'none';
         }
         
+        // Delete buttons only for Owner/Admin
         const deleteBtns = document.querySelectorAll('.delete-item-btn');
         deleteBtns.forEach(btn => {
-            btn.style.display = isAdmin ? 'inline-block' : 'none';
+            btn.style.display = isOwnerOrAdmin ? 'inline-block' : 'none';
         });
-
-        // Settings Tab
-        const settingsTab = document.getElementById('nav-settings');
-        if (settingsTab) {
-            settingsTab.style.display = isAdmin ? 'inline-block' : 'none';
-        }
         
-        // Redirect if needed
-        if (!isAdmin) {
-            switchTab('billing');
-        } else {
-            // If admin, stay on current or go to inventory
-            // For now, let's just default to inventory for admin on login
-            if (document.getElementById('app-container').style.display !== 'none') {
-                 switchTab('inventory');
+        // Edit functionality based on roles
+        const editBtns = document.querySelectorAll('.edit-item-btn');
+        editBtns.forEach(btn => {
+            // Manager can edit inventory, Cashier cannot
+            if (isCashier) {
+                btn.style.display = 'none';
             }
+        });
+        
+        // Redirect based on role
+        const currentTab = getActiveTabName();
+        if (isCashier && currentTab !== 'billing') {
+            switchTab('billing');
+            return;
+        }
+        if (isManager && currentTab === 'settings') {
+            switchTab('inventory');
+            return;
+        }
+
+        // If nothing is active yet, default to Billing
+        if (!currentTab) {
+            switchTab('billing');
         }
     }
 
     function loadUserData(uid) {
         const dbRef = ref(db);
-        get(child(dbRef, `users/${uid}`)).then((snapshot) => {
-            if (snapshot.exists()) {
-                const data = snapshot.val();
-                inventory = data.inventory || [];
-                transactions = data.transactions || [];
-                settings = data.settings || settings;
-                if (data.categories) {
-                    categories = data.categories;
-                }
-                if (data.appUsers) {
-                    appUsers = data.appUsers;
-                }
-            } else {
-                // New user or no data
-                inventory = [];
-                transactions = [];
-            }
-            // Initial Render after data load
-            renderInventory();
-            loadSettingsForm();
-            renderReports(); // Update reports with loaded data
-            renderCategoryOptions();
-            renderAppUsers();
-            updateSalesPersonDropdown();
+        
+        // Try to load from localStorage first for immediate display
+        try {
+            const localInv = localStorage.getItem('bs_inventory');
+            const localTx = localStorage.getItem('bs_transactions');
+            const localSettings = localStorage.getItem('bs_settings');
+            const localCategories = localStorage.getItem('bs_categories');
+            const localUsers = localStorage.getItem('bs_appUsers');
+            const localLogs = localStorage.getItem('bs_activity_logs');
             
-            // Auto-login as Admin/Owner
-            const adminUser = appUsers.find(u => u.role === 'Admin') || appUsers[0];
-            if (adminUser) {
-                currentAppUser = adminUser;
-                appContainer.style.display = 'block';
-                document.getElementById('loggedInStaffName').textContent = adminUser.name + ' (' + adminUser.role + ')';
-                applyPermissions();
-            }
-        }).catch((error) => {
-            console.error(error);
-            // If Firebase read failed, try loading local backup
-            try {
-                const localInv = localStorage.getItem('bs_inventory');
-                const localTx = localStorage.getItem('bs_transactions');
-                if (localInv) inventory = JSON.parse(localInv);
-                if (localTx) transactions = JSON.parse(localTx);
+            if (localInv) inventory = JSON.parse(localInv);
+            if (localTx) transactions = JSON.parse(localTx);
+            if (localSettings) settings = JSON.parse(localSettings);
+            if (localCategories) categories = JSON.parse(localCategories);
+            if (localUsers) appUsers = JSON.parse(localUsers);
+            if (localLogs) activityLogs = JSON.parse(localLogs);
+            
+            // Render immediately with local data
+            if (localInv || localTx) {
                 renderInventory();
                 renderReports();
                 renderCategoryOptions();
-            } catch (e) {
-                console.warn('Failed to load local backup', e);
+                renderAppUsers();
+                updateSalesPersonDropdown();
+                renderActivityLogs();
+                updateActivityLogFilter();
             }
-        });
+        } catch (e) {
+            console.warn('Failed to load local data:', e);
+        }
+        
+        // If online, fetch from Firebase and update
+        if (navigator.onLine) {
+            get(child(dbRef, `users/${uid}`)).then((snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
+                    inventory = data.inventory || [];
+                    transactions = data.transactions || [];
+                    settings = data.settings || settings;
+                    if (data.categories) {
+                        categories = data.categories;
+                    }
+                    if (data.appUsers) {
+                        appUsers = data.appUsers;
+                    }
+                    if (data.activityLogs) {
+                        activityLogs = data.activityLogs;
+                    }
+                    
+                    // Save to localStorage
+                    try {
+                        localStorage.setItem('bs_inventory', JSON.stringify(inventory));
+                        localStorage.setItem('bs_transactions', JSON.stringify(transactions));
+                        localStorage.setItem('bs_settings', JSON.stringify(settings));
+                        localStorage.setItem('bs_categories', JSON.stringify(categories));
+                        localStorage.setItem('bs_appUsers', JSON.stringify(appUsers));
+                        localStorage.setItem('bs_activity_logs', JSON.stringify(activityLogs));
+                    } catch (e) {
+                        console.warn('Failed to cache data locally:', e);
+                    }
+                } else {
+                    // New user or no data
+                    inventory = [];
+                    transactions = [];
+                }
+                
+                // Re-render with fresh data
+                renderInventory();
+                loadSettingsForm();
+                renderReports();
+                renderCategoryOptions();
+                renderAppUsers();
+                updateSalesPersonDropdown();
+                renderActivityLogs();
+                updateActivityLogFilter();
+                
+                // Auto-login as Owner/Admin
+                const adminUser = appUsers.find(u => u.role === 'Owner' || u.role === 'Admin') || appUsers[0];
+                if (adminUser) {
+                    currentAppUser = adminUser;
+                    appContainer.style.display = 'block';
+                    document.getElementById('loggedInStaffName').textContent = adminUser.name + ' (' + adminUser.role + ')';
+                    applyPermissions();
+                    
+                    logActivity('Login', `User logged in`);
+                    
+                    // Show low stock notification
+                    setTimeout(() => {
+                        const threshold = settings.lowStockThreshold || 5;
+                        const lowStockCount = inventory.filter(i => parseInt(i.quantity) <= threshold).length;
+                        if (lowStockCount > 0) {
+                            showLowStockNotification();
+                        }
+                    }, 1500);
+                }
+                
+                // Sync any pending changes
+                syncPendingChanges();
+            }).catch((error) => {
+                console.error('Firebase load error:', error);
+                // Continue with local data if Firebase fails
+                console.log('Working offline with cached data');
+            });
+        } else {
+            // Offline mode - use local data
+            console.log('Offline mode - using cached data');
+            
+            // Auto-login with local data
+            const adminUser = appUsers.find(u => u.role === 'Owner' || u.role === 'Admin') || appUsers[0];
+            if (adminUser) {
+                currentAppUser = adminUser;
+                appContainer.style.display = 'block';
+                document.getElementById('loggedInStaffName').textContent = adminUser.name + ' (' + adminUser.role + ') - OFFLINE';
+                applyPermissions();
+                logActivity('Login', 'User logged in (Offline mode)');
+            }
+        }
     }
 
     function renderCategoryOptions() {
@@ -352,10 +757,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${user.name}</td>
-                <td>${user.role}</td>
-                <td>${user.pin || 'N/A'}</td>
+                <td><span style="padding: 2px 8px; background: ${user.role === 'Owner' ? '#e74c3c' : user.role === 'Admin' ? '#e67e22' : user.role === 'Manager' ? '#3498db' : '#95a5a6'}; color: white; border-radius: 3px; font-size: 11px;">${user.role}</span></td>
+                <td><span style="color: #999; font-family: monospace;">****</span> <small style="color: #bbb;">(secured)</small></td>
                 <td>
-                    ${index > 0 ? `<button class="delete-btn" onclick="deleteAppUser(${index})">Delete</button>` : '<span style="color: gray;">Default</span>'}
+                    ${index > 0 ? `<button class="delete-btn" onclick="deleteAppUser(${index})" style="padding: 5px 10px; font-size: 12px;">Delete</button>` : '<span style="color: gray; font-size: 12px;">Default Owner</span>'}
                 </td>
             `;
             tbody.appendChild(row);
@@ -376,71 +781,232 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('user-form').addEventListener('submit', (e) => {
         e.preventDefault();
-        const name = document.getElementById('userName').value;
+        
+        // Security Check: Only Owner/Admin can add users
+        if (!currentAppUser || (currentAppUser.role !== 'Owner' && currentAppUser.role !== 'Admin')) {
+            alert('Access Denied: Only Owner/Admin can add users.');
+            return;
+        }
+        
+        const name = document.getElementById('userName').value.trim();
         const role = document.getElementById('userRole').value;
         const pin = document.getElementById('userPin').value;
         
-        if (name && pin) {
-            // Check if PIN is unique
-            if (appUsers.some(u => u.pin === pin)) {
-                alert('PIN already exists! Please choose another.');
+        // Validation
+        if (!name || !pin) {
+            alert('Please enter both name and PIN.');
+            return;
+        }
+        
+        if (pin.length < 4) {
+            alert('PIN must be at least 4 digits.');
+            return;
+        }
+        
+        if (!/^\d+$/.test(pin)) {
+            alert('PIN must contain only numbers.');
+            return;
+        }
+        
+        // Check if name already exists
+        if (appUsers.some(u => u.name.toLowerCase() === name.toLowerCase())) {
+            alert('A user with this name already exists!');
+            return;
+        }
+        
+        // Hash the PIN for security
+        const hashedPin = hashPin(pin);
+        
+        // Check if hashed PIN already exists (prevents same PIN reuse)
+        if (appUsers.some(u => u.pin === hashedPin)) {
+            alert('This PIN is already in use. Please choose a different PIN.');
+            return;
+        }
+        
+        // Validation: Prevent creating multiple Owners
+        if (role === 'Owner' && appUsers.some(u => u.role === 'Owner')) {
+            if (!confirm('An Owner already exists. Are you sure you want to create another Owner account?')) {
                 return;
             }
-
-            appUsers.push({ name, role, pin });
-            if (currentUser) {
-                set(ref(db, `users/${currentUser.uid}/appUsers`), appUsers);
-            }
-            renderAppUsers();
-            updateSalesPersonDropdown();
-            document.getElementById('user-form').reset();
         }
+
+        appUsers.push({ name, role, pin: hashedPin });
+        
+        logActivity('Add User', `Created user "${name}" with role ${role}`);
+        
+        try {
+            localStorage.setItem('bs_appUsers', JSON.stringify(appUsers));
+        } catch (e) {
+            console.warn('Failed to save users locally:', e);
+        }
+        
+        if (currentUser) {
+            if (navigator.onLine) {
+                set(ref(db, `users/${currentUser.uid}/appUsers`), appUsers)
+                    .then(() => {
+                        alert(`✓ User "${name}" (${role}) added successfully!`);
+                    })
+                    .catch(() => {
+                        addToSyncQueue('appUsers', appUsers);
+                        alert(`User "${name}" added (will sync when online)`);
+                    });
+            } else {
+                addToSyncQueue('appUsers', appUsers);
+                alert(`User "${name}" added (will sync when online)`);
+            }
+        } else {
+            alert(`User "${name}" added successfully!`);
+        }
+        
+        renderAppUsers();
+        updateSalesPersonDropdown();
+        updateActivityLogFilter();
+        document.getElementById('user-form').reset();
     });
 
     window.deleteAppUser = function(index) {
-        if (confirm('Delete this user?')) {
+        // Security Check: Only Owner/Admin can delete users
+        if (!currentAppUser || (currentAppUser.role !== 'Owner' && currentAppUser.role !== 'Admin')) {
+            alert('Access Denied: Only Owner/Admin can delete users.');
+            return;
+        }
+        
+        const userToDelete = appUsers[index];
+        
+        // Prevent deleting yourself
+        if (currentAppUser.name === userToDelete.name) {
+            alert('Cannot delete your own account while logged in!');
+            return;
+        }
+        
+        // Prevent deleting the last Owner
+        if (userToDelete.role === 'Owner') {
+            const ownerCount = appUsers.filter(u => u.role === 'Owner').length;
+            if (ownerCount <= 1) {
+                alert('Cannot delete the last Owner account! Create another Owner first.');
+                return;
+            }
+        }
+        
+        if (confirm(`⚠️ DELETE USER\n\nName: ${userToDelete.name}\nRole: ${userToDelete.role}\n\nThis action cannot be undone. Continue?`)) {
+            const userName = userToDelete.name;
+            const userRole = userToDelete.role;
+            
             appUsers.splice(index, 1);
+            
+            logActivity('Delete User', `Removed user "${userName}" (${userRole})`);
+            
+            try {
+                localStorage.setItem('bs_appUsers', JSON.stringify(appUsers));
+            } catch (e) {
+                console.warn('Failed to save users locally:', e);
+            }
             if (currentUser) {
-                set(ref(db, `users/${currentUser.uid}/appUsers`), appUsers);
+                if (navigator.onLine) {
+                    set(ref(db, `users/${currentUser.uid}/appUsers`), appUsers)
+                        .catch(() => addToSyncQueue('appUsers', appUsers));
+                } else {
+                    addToSyncQueue('appUsers', appUsers);
+                }
             }
             renderAppUsers();
             updateSalesPersonDropdown();
         }
     };
 
+    // --- Secure PIN Hashing ---
+    function hashPin(pin) {
+        // Simple hash function for PIN security
+        let hash = 0;
+        const str = pin + 'BILLING_SALT_2025';
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return Math.abs(hash).toString(36);
+    }
+    
+    function verifyPin(inputPin, hashedPin) {
+        return hashPin(inputPin) === hashedPin;
+    }
+
     // --- Navigation ---
     window.switchTab = function(tab) {
-        // Permission Check
-        if ((tab === 'settings' || tab === 'inventory') && currentAppUser && currentAppUser.role !== 'Admin') {
-            // alert('Access Denied: Admin only.'); // Optional: Silent redirect or alert
-            return;
-        }
-
-        document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-        document.getElementById(`nav-${tab}`).classList.add('active');
-
-        document.getElementById('inventory-section').style.display = 'none';
-        document.getElementById('billing-section').style.display = 'none';
-        document.getElementById('reports-section').style.display = 'none';
-        document.getElementById('settings-section').style.display = 'none';
-
-        if (tab === 'inventory') {
-            document.getElementById('inventory-section').style.display = 'block';
-        } else if (tab === 'billing') {
-            document.getElementById('billing-section').style.display = 'block';
-            updateBillingDatalist();
-            // Apply default tax
-            if(document.getElementById('billTaxRate').value == 0) {
-                document.getElementById('billTaxRate').value = settings.defaultTax;
+        try {
+            // Permission Check based on roles
+            if (currentAppUser) {
+                const role = currentAppUser.role;
+                const isOwnerOrAdmin = role === 'Owner' || role === 'Admin';
+                const isCashier = role === 'Cashier';
+                
+                // Enforce permissions
+                if (tab === 'settings' && !isOwnerOrAdmin) {
+                    alert('Access Denied: Settings are only accessible to Owner/Admin.');
+                    return;
+                }
+                if ((tab === 'inventory' || tab === 'reports') && isCashier) {
+                    alert('Access Denied: Cashiers can only access Billing.');
+                    return;
+                }
             }
-        } else if (tab === 'reports') {
-            document.getElementById('reports-section').style.display = 'block';
-            renderReports();
-        } else if (tab === 'settings') {
-            document.getElementById('settings-section').style.display = 'block';
-            loadSettingsForm();
+
+            // Update nav active state (guard in case an element is missing)
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`nav-${tab}`)?.classList.add('active');
+
+            // Hide all sections (guard in case an element is missing)
+            document.getElementById('inventory-section')?.style && (document.getElementById('inventory-section').style.display = 'none');
+            document.getElementById('billing-section')?.style && (document.getElementById('billing-section').style.display = 'none');
+            document.getElementById('reports-section')?.style && (document.getElementById('reports-section').style.display = 'none');
+            document.getElementById('settings-section')?.style && (document.getElementById('settings-section').style.display = 'none');
+
+            // Show the selected section FIRST (so a later error can't leave the UI stuck)
+            if (tab === 'inventory') {
+                document.getElementById('inventory-section')?.style && (document.getElementById('inventory-section').style.display = 'block');
+            } else if (tab === 'billing') {
+                document.getElementById('billing-section')?.style && (document.getElementById('billing-section').style.display = 'block');
+                try {
+                    updateBillingDatalist();
+                    // Apply default tax
+                    const taxInput = document.getElementById('billTaxRate');
+                    if (taxInput && (parseFloat(taxInput.value) || 0) === 0) {
+                        taxInput.value = settings.defaultTax;
+                    }
+                } catch (err) {
+                    console.error('Billing tab initialization failed:', err);
+                }
+            } else if (tab === 'reports') {
+                document.getElementById('reports-section')?.style && (document.getElementById('reports-section').style.display = 'block');
+                try {
+                    renderReports();
+                    // Show notification if there are low stock items
+                    const threshold = settings.lowStockThreshold || 5;
+                    const lowStockCount = inventory.filter(i => parseInt(i.quantity) <= threshold).length;
+                    if (lowStockCount > 0) {
+                        setTimeout(() => showLowStockNotification(), 500);
+                    }
+                } catch (err) {
+                    console.error('Reports tab initialization failed:', err);
+                }
+            } else if (tab === 'settings') {
+                document.getElementById('settings-section')?.style && (document.getElementById('settings-section').style.display = 'block');
+                try {
+                    loadSettingsForm();
+                } catch (err) {
+                    console.error('Settings tab initialization failed:', err);
+                }
+            }
+        } catch (err) {
+            console.error('switchTab failed:', err);
         }
     };
+
+    // Fallback: bind nav button clicks in JS as well (in addition to inline onclick)
+    document.getElementById('nav-inventory')?.addEventListener('click', () => window.switchTab('inventory'));
+    document.getElementById('nav-billing')?.addEventListener('click', () => window.switchTab('billing'));
+    document.getElementById('nav-reports')?.addEventListener('click', () => window.switchTab('reports'));
+    document.getElementById('nav-settings')?.addEventListener('click', () => window.switchTab('settings'));
 
     // --- Inventory Management ---
 
@@ -449,19 +1015,43 @@ document.addEventListener('DOMContentLoaded', () => {
         const fragment = document.createDocumentFragment();
         const isAdmin = currentAppUser && currentAppUser.role === 'Admin';
         const deleteStyle = isAdmin ? '' : 'display:none;';
+        const threshold = settings.lowStockThreshold || 5;
 
         itemsToRender.forEach((item) => {
             const originalIndex = inventory.indexOf(item);
+            const qty = parseInt(item.quantity);
+            
+            // Determine color based on stock level
+            let qtyColor = '#2ecc71'; // Green - Good stock
+            let qtyBg = '#d4edda';
+            if (qty === 0) {
+                qtyColor = '#e74c3c'; // Red - Out of stock
+                qtyBg = '#f8d7da';
+            } else if (qty <= threshold) {
+                qtyColor = '#e74c3c'; // Red - Low stock
+                qtyBg = '#f8d7da';
+            } else if (qty <= threshold * 2) {
+                qtyColor = '#f39c12'; // Yellow/Orange - Medium stock
+                qtyBg = '#fff3cd';
+            }
+            
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${originalIndex + 1}</td>
                 <td>${item.barcode || '-'}</td>
                 <td>${item.name}</td>
                 <td>${item.category || 'General'}</td>
-                <td>${item.quantity}</td>
+                <td style="background-color: ${qtyBg}; color: ${qtyColor}; font-weight: bold; text-align: center;">
+                    ${item.quantity}
+                    ${qty === 0 ? ' <span style="font-size: 10px;">⚠️</span>' : qty <= threshold ? ' <span style="font-size: 10px;">🔔</span>' : ''}
+                </td>
                 <td>₹${item.mrp ? parseFloat(item.mrp).toFixed(2) : '-'}</td>
                 <td>₹${item.costPrice ? parseFloat(item.costPrice).toFixed(2) : '-'}</td>
                 <td>₹${parseFloat(item.sellingPrice || item.price || 0).toFixed(2)}</td>
+                <td style="text-align: center;">
+                    ${item.barcode ? `<button class="secondary-btn" onclick="printSingleBarcode(${originalIndex}, 'barcode')" style="padding: 4px 8px; font-size: 11px; margin: 2px;">📊</button>` : '<span style="color: #999;">-</span>'}
+                    <button class="secondary-btn" onclick="printSingleBarcode(${originalIndex}, 'qr')" style="padding: 4px 8px; font-size: 11px; margin: 2px;">📱</button>
+                </td>
                 <td>
                     <button class="edit-btn" onclick="editItem(${originalIndex})">Edit</button>
                     <button class="delete-btn delete-item-btn" onclick="deleteItem(${originalIndex})" style="${deleteStyle}">Delete</button>
@@ -472,6 +1062,9 @@ document.addEventListener('DOMContentLoaded', () => {
         inventoryTableBody.innerHTML = '';
         inventoryTableBody.appendChild(fragment);
         updateBillingDatalist();
+        
+        // Update low stock badge
+        updateLowStockBadge();
     }
 
     window.filterInventory = function() {
@@ -487,6 +1080,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const inventorySearchEl = document.getElementById('inventorySearch');
     if (inventorySearchEl) {
         inventorySearchEl.addEventListener('input', debounce(window.filterInventory, 200));
+    }
+
+    // Event delegation for transaction table buttons (set up once)
+    const transactionsTableBody = document.querySelector('#transactions-table tbody');
+    if (transactionsTableBody) {
+        transactionsTableBody.addEventListener('click', (e) => {
+            const target = e.target;
+            if (target.dataset.action === 'reprint') {
+                reprintBill(target.dataset.invoice);
+            } else if (target.dataset.action === 'return') {
+                openReturnModal(target.dataset.invoice);
+            }
+        });
     }
 
 
@@ -547,6 +1153,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     inventoryForm.addEventListener('submit', (e) => {
         e.preventDefault();
+
+        const wasEditing = editIndex !== -1;
         
         const barcode = document.getElementById('itemBarcode').value;
         const name = document.getElementById('itemName').value;
@@ -567,19 +1175,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 sellingPrice: parseFloat(sellingPrice)
             };
 
+            // Attach image if provided (base64). Preserve existing image on edit if none selected.
+            const imageData = window.pendingItemImage || (wasEditing ? (inventory[editIndex]?.image || null) : null);
+            if (imageData) {
+                itemData.image = imageData;
+            }
+
             if (editIndex === -1) {
                 inventory.push(itemData);
+                logActivity('Add Item', `Added "${name}" - Qty: ${quantity}, Price: ₹${sellingPrice}`);
             } else {
                 inventory[editIndex] = itemData;
                 editIndex = -1;
                 document.querySelector('#inventory-form button[type="submit"]').textContent = 'Add Item';
+                logActivity('Edit Item', `Updated "${name}" - Qty: ${quantity}, Price: ₹${sellingPrice}`);
             }
 
             // Check and save new category
             if (category && !categories.includes(category)) {
                 categories.push(category);
+                try {
+                    localStorage.setItem('bs_categories', JSON.stringify(categories));
+                } catch (e) {
+                    console.warn('Failed to save categories locally:', e);
+                }
                 if (currentUser) {
-                    set(ref(db, `users/${currentUser.uid}/categories`), categories);
+                    if (navigator.onLine) {
+                        set(ref(db, `users/${currentUser.uid}/categories`), categories)
+                            .catch(() => addToSyncQueue('categories', categories));
+                    } else {
+                        addToSyncQueue('categories', categories);
+                    }
                 }
                 renderCategoryOptions();
             }
@@ -587,13 +1213,18 @@ document.addEventListener('DOMContentLoaded', () => {
             saveInventory();
             renderInventory();
             inventoryForm.reset();
+
+            // Clear pending image + file input after save
+            window.pendingItemImage = null;
+            const itemImageInput = document.getElementById('itemImage');
+            if (itemImageInput) itemImageInput.value = '';
             
             // Cartoon animations
             const formRect = inventoryForm.getBoundingClientRect();
             createSparkles(formRect.left + formRect.width / 2, formRect.top + formRect.height / 2);
             addCartoonEffect(inventoryForm, 'rubber-band');
             createCoinDrop(formRect.left + formRect.width / 2, formRect.top + formRect.height / 2);
-            showSuccessPopup(editIndex === -1 ? 'Item Added!' : 'Item Updated!');
+            showSuccessPopup(wasEditing ? 'Item Updated!' : 'Item Added!');
         }
     });
 
@@ -618,10 +1249,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // Cartoon deletion effects
             createBoomEffect(window.innerWidth / 2, window.innerHeight / 2);
             createFloatingEmoji('🗑️', window.innerWidth / 2 - 25, window.innerHeight / 2);
+            const itemName = inventory[index].name;
+            const itemQty = inventory[index].quantity;
             
             inventory.splice(index, 1);
             saveInventory();
             renderInventory();
+            
+            logActivity('Delete Item', `Deleted "${itemName}" (Qty: ${itemQty})`);
             
             const invTable = document.querySelector('#inventory-table');
             if (invTable) addCartoonEffect(invTable, 'wiggle');
@@ -630,14 +1265,24 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function saveInventory() {
-        if (currentUser) {
-            set(ref(db, `users/${currentUser.uid}/inventory`), inventory);
-        }
-        // Always keep a local backup for offline/fallback
+        // Always save locally first
         try {
             localStorage.setItem('bs_inventory', JSON.stringify(inventory));
         } catch (e) {
-            console.warn('Local backup failed', e);
+            console.warn('Local save failed', e);
+        }
+        
+        // Queue for Firebase sync if online
+        if (currentUser) {
+            if (navigator.onLine) {
+                set(ref(db, `users/${currentUser.uid}/inventory`), inventory)
+                    .catch(err => {
+                        console.error('Firebase save failed:', err);
+                        addToSyncQueue('inventory', inventory);
+                    });
+            } else {
+                addToSyncQueue('inventory', inventory);
+            }
         }
     }
 
@@ -646,6 +1291,19 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('bs_transactions', JSON.stringify(transactions));
         } catch (e) {
             console.warn('Saving transactions locally failed', e);
+        }
+        
+        // Queue for Firebase sync
+        if (currentUser) {
+            if (navigator.onLine) {
+                set(ref(db, `users/${currentUser.uid}/transactions`), transactions)
+                    .catch(err => {
+                        console.error('Firebase save failed:', err);
+                        addToSyncQueue('transactions', transactions);
+                    });
+            } else {
+                addToSyncQueue('transactions', transactions);
+            }
         }
     }
 
@@ -915,6 +1573,9 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             transactions.push(transaction);
             
+            // Log activity
+            logActivity('Sale Completed', `Invoice ${invoiceNo} - ${customerName} - ₹${grandTotal} (${paymentMode})`);
+            
             // Save both inventory and transactions to Firebase
             if (currentUser) {
                 set(ref(db, `users/${currentUser.uid}/inventory`), inventory)
@@ -1026,7 +1687,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderReports() {
         const totalSalesElement = document.getElementById('totalSales');
         const totalOrdersElement = document.getElementById('totalOrders');
-        const transactionsTableBody = document.querySelector('#transactions-table tbody');
+        const transTableBody = document.querySelector('#transactions-table tbody');
         
         // New Elements
         const totalInventoryValueElement = document.getElementById('totalInventoryValue');
@@ -1111,6 +1772,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let inventoryValue = 0;
         let stockCount = 0;
         let lowStockItems = [];
+        let outOfStockItems = [];
+        const threshold = settings.lowStockThreshold || 5;
 
         inventory.forEach(i => {
             const qty = parseInt(i.quantity);
@@ -1118,7 +1781,9 @@ document.addEventListener('DOMContentLoaded', () => {
             inventoryValue += (parseFloat(i.sellingPrice) || 0) * qty;
             stockCount += qty;
 
-            if(qty < 5) {
+            if(qty === 0) {
+                outOfStockItems.push(i);
+            } else if(qty <= threshold) {
                 lowStockItems.push(i);
             }
         });
@@ -1187,47 +1852,83 @@ document.addEventListener('DOMContentLoaded', () => {
         // Render Low Stock Table
         if(lowStockTableBody) {
             lowStockTableBody.innerHTML = '';
-            if(lowStockItems.length === 0) {
-                lowStockTableBody.innerHTML = '<tr><td colspan="2" style="text-align:center;">No low stock items</td></tr>';
+            const allLowStock = [...outOfStockItems, ...lowStockItems];
+            
+            if(allLowStock.length === 0) {
+                lowStockTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #2ecc71; padding: 20px;">✅ All items are well stocked!</td></tr>';
             } else {
-                lowStockItems.forEach(item => {
+                // Sort by quantity (lowest first)
+                allLowStock.sort((a, b) => parseInt(a.quantity) - parseInt(b.quantity));
+                
+                allLowStock.forEach(item => {
+                    const qty = parseInt(item.quantity);
+                    const isOutOfStock = qty === 0;
+                    const statusText = isOutOfStock ? 'OUT OF STOCK' : 'LOW STOCK';
+                    const statusColor = isOutOfStock ? '#e74c3c' : '#f39c12';
+                    const statusBg = isOutOfStock ? '#f8d7da' : '#fff3cd';
+                    
                     const row = document.createElement('tr');
                     row.innerHTML = `
-                        <td>${item.name}</td>
-                        <td style="color: red; font-weight: bold;">${item.quantity}</td>
+                        <td style="font-weight: bold;">${item.name}</td>
+                        <td>${item.category || 'General'}</td>
+                        <td style="text-align: center; font-weight: bold; color: ${statusColor};">${qty}</td>
+                        <td style="background-color: ${statusBg}; color: ${statusColor}; font-weight: bold; text-align: center; font-size: 11px;">
+                            ${statusText}
+                        </td>
+                        <td>
+                            <button class="edit-btn" onclick="editItem(${inventory.indexOf(item)})" style="font-size: 12px; padding: 4px 8px;">Restock</button>
+                        </td>
                     `;
                     lowStockTableBody.appendChild(row);
                 });
             }
+            
+            // Update summary text
+            const summaryEl = document.getElementById('low-stock-summary');
+            if (summaryEl) {
+                if (allLowStock.length === 0) {
+                    summaryEl.textContent = 'No items need restocking.';
+                    summaryEl.style.color = '#2ecc71';
+                } else {
+                    const outMsg = outOfStockItems.length > 0 ? `${outOfStockItems.length} out of stock` : '';
+                    const lowMsg = lowStockItems.length > 0 ? `${lowStockItems.length} low stock` : '';
+                    const parts = [outMsg, lowMsg].filter(p => p);
+                    summaryEl.textContent = `⚠️ ${parts.join(', ')} - Threshold: ${threshold} units`;
+                    summaryEl.style.color = outOfStockItems.length > 0 ? '#e74c3c' : '#f39c12';
+                    summaryEl.style.fontWeight = 'bold';
+                }
+            }
         }
 
         // Render Transactions Table
-        transactionsTableBody.innerHTML = '';
-        // Show last 10 transactions reversed
-        transactions.slice().reverse().slice(0, 10).forEach(t => {
-            const row = document.createElement('tr');
-            const isRefund = t.type === 'Refund';
-            const amountStyle = isRefund ? 'color: red;' : '';
-            
-            row.innerHTML = `
-                <td>${t.date}</td>
-                <td>${t.invoiceNo}</td>
-                <td>${t.customerName}</td>
-                <td style="${amountStyle}">₹${parseFloat(t.grandTotal).toFixed(2)}</td>
-                <td>${t.paymentMode}</td>
-                <td>
-                    <button class="view-btn" onclick="reprintBill('${t.invoiceNo}')">Reprint</button>
-                    ${!isRefund ? `<button class="delete-btn" style="padding: 5px 10px; font-size: 14px; background-color: #e67e22;" onclick="openReturnModal('${t.invoiceNo}')">Return</button>` : ''}
-                </td>
-            `;
-            transactionsTableBody.appendChild(row);
-        });
+        if (transTableBody) {
+            transTableBody.innerHTML = '';
+            // Show last 10 transactions reversed
+            transactions.slice().reverse().slice(0, 10).forEach(t => {
+                const row = document.createElement('tr');
+                const isRefund = t.type === 'Refund';
+                const amountStyle = isRefund ? 'color: red;' : '';
+                
+                row.innerHTML = `
+                    <td>${t.date}</td>
+                    <td>${t.invoiceNo}</td>
+                    <td>${t.customerName}</td>
+                    <td style="${amountStyle}">₹${parseFloat(t.grandTotal).toFixed(2)}</td>
+                    <td>${t.paymentMode}</td>
+                    <td>
+                        <button class="view-btn" data-invoice="${t.invoiceNo}" data-action="reprint">Reprint</button>
+                        ${!isRefund ? `<button class="delete-btn" style="padding: 5px 10px; font-size: 14px; background-color: #e67e22;" data-invoice="${t.invoiceNo}" data-action="return">Return</button>` : ''}
+                    </td>
+                `;
+                transTableBody.appendChild(row);
+            });
+        }
 
         // --- Render Charts ---
         
         // 1. Sales Trend Chart
         const salesCtx = document.getElementById('salesChart');
-        if (salesCtx) {
+        if (salesCtx && typeof Chart !== 'undefined') {
             if (salesChartInstance) {
                 salesChartInstance.destroy();
             }
@@ -1235,7 +1936,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const dates = Object.keys(dailySales);
             const salesData = Object.values(dailySales);
 
-            salesChartInstance = new Chart(salesCtx, {
+            try {
+                salesChartInstance = new Chart(salesCtx, {
                 type: 'line',
                 data: {
                     labels: dates,
@@ -1258,11 +1960,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             });
+            } catch (error) {
+                console.warn('Failed to render sales chart:', error);
+            }
         }
 
         // 2. Category Chart
         const categoryCtx = document.getElementById('categoryChart');
-        if (categoryCtx) {
+        if (categoryCtx && typeof Chart !== 'undefined') {
             if (categoryChartInstance) {
                 categoryChartInstance.destroy();
             }
@@ -1275,7 +1980,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 `hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)`
             );
 
-            categoryChartInstance = new Chart(categoryCtx, {
+            try {
+                categoryChartInstance = new Chart(categoryCtx, {
                 type: 'doughnut',
                 data: {
                     labels: catLabels,
@@ -1295,6 +2001,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             });
+            } catch (error) {
+                console.warn('Failed to render category chart:', error);
+            }
         }
     }
 
@@ -1565,20 +2274,48 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('storeAddress').value = settings.storeAddress;
         document.getElementById('storePhone').value = settings.storePhone;
         document.getElementById('defaultTax').value = settings.defaultTax;
+        document.getElementById('lowStockThreshold').value = settings.lowStockThreshold || 5;
     }
 
     document.getElementById('settings-form').addEventListener('submit', (e) => {
         e.preventDefault();
+        const oldThreshold = settings.lowStockThreshold;
         settings = {
             storeName: document.getElementById('storeName').value,
             storeAddress: document.getElementById('storeAddress').value,
             storePhone: document.getElementById('storePhone').value,
-            defaultTax: parseFloat(document.getElementById('defaultTax').value) || 0
+            defaultTax: parseFloat(document.getElementById('defaultTax').value) || 0,
+            lowStockThreshold: parseInt(document.getElementById('lowStockThreshold').value) || 5
         };
-        if (currentUser) {
-            set(ref(db, `users/${currentUser.uid}/settings`), settings);
+        
+        // Save locally
+        try {
+            localStorage.setItem('bs_settings', JSON.stringify(settings));
+        } catch (e) {
+            console.warn('Failed to save settings locally:', e);
         }
+        
+        // Sync to Firebase
+        if (currentUser) {
+            if (navigator.onLine) {
+                set(ref(db, `users/${currentUser.uid}/settings`), settings)
+                    .catch(err => {
+                        addToSyncQueue('settings', settings);
+                    });
+            } else {
+                addToSyncQueue('settings', settings);
+            }
+        }
+        
         alert('Settings Saved!');
+        
+        logActivity('Update Settings', `Store: ${settings.storeName}, Tax: ${settings.defaultTax}%, Low Stock: ${settings.lowStockThreshold}`);
+        
+        // Re-render inventory if threshold changed to update colors
+        if (oldThreshold !== settings.lowStockThreshold) {
+            renderInventory();
+            renderReports();
+        }
     });
 
     window.clearAllData = function() {
@@ -1595,6 +2332,678 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // --- Low Stock Alert Functions ---
+    function updateLowStockBadge() {
+        const threshold = settings.lowStockThreshold || 5;
+        const lowStockCount = inventory.filter(i => parseInt(i.quantity) <= threshold).length;
+        const badge = document.getElementById('low-stock-badge');
+        
+        if (badge) {
+            if (lowStockCount > 0) {
+                badge.textContent = lowStockCount;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    }
+
+    function showLowStockNotification() {
+        const threshold = settings.lowStockThreshold || 5;
+        const lowStockItems = inventory.filter(i => parseInt(i.quantity) <= threshold && parseInt(i.quantity) > 0);
+        const outOfStockItems = inventory.filter(i => parseInt(i.quantity) === 0);
+        
+        // Remove any existing notification
+        const existingNotification = document.querySelector('.low-stock-notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+        
+        if (outOfStockItems.length > 0 || lowStockItems.length > 0) {
+            let message = '🔔 Stock Alert:\n\n';
+            
+            if (outOfStockItems.length > 0) {
+                message += `⚠️ ${outOfStockItems.length} item(s) OUT OF STOCK:\n`;
+                outOfStockItems.slice(0, 3).forEach(item => {
+                    message += `  • ${item.name}\n`;
+                });
+                if (outOfStockItems.length > 3) {
+                    message += `  ... and ${outOfStockItems.length - 3} more\n`;
+                }
+                message += '\n';
+            }
+            
+            if (lowStockItems.length > 0) {
+                message += `🟡 ${lowStockItems.length} item(s) LOW STOCK:\n`;
+                lowStockItems.slice(0, 3).forEach(item => {
+                    message += `  • ${item.name} (${item.quantity} left)\n`;
+                });
+                if (lowStockItems.length > 3) {
+                    message += `  ... and ${lowStockItems.length - 3} more\n`;
+                }
+            }
+            
+            // Show custom notification popup
+            const popup = document.createElement('div');
+            popup.className = 'low-stock-notification';
+            popup.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                    <strong style="font-size: 16px;">🔔 Stock Alert</strong>
+                    <span onclick="this.parentElement.parentElement.remove()" style="cursor: pointer; font-size: 20px; line-height: 1;">&times;</span>
+                </div>
+                <div style="white-space: pre-line; font-size: 13px;">${message}</div>
+                <button id="view-low-stock-btn" style="margin-top: 10px; width: 100%; padding: 8px; background: white; color: #e74c3c; border: 1px solid white; border-radius: 4px; cursor: pointer; font-weight: bold;">View Details</button>
+            `;
+            document.body.appendChild(popup);
+            
+            // Add event listener to button
+            document.getElementById('view-low-stock-btn').addEventListener('click', function() {
+                switchTab('reports');
+                popup.remove();
+            });
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (popup.parentElement) popup.remove();
+            }, 10000);
+        }
+    }
+
+    window.exportLowStock = function() {
+        const threshold = settings.lowStockThreshold || 5;
+        const lowStockItems = inventory.filter(i => parseInt(i.quantity) <= threshold);
+        
+        if (lowStockItems.length === 0) {
+            alert('No low stock items to export.');
+            return;
+        }
+        
+        const headers = ['Item Name', 'Category', 'Current Quantity', 'Selling Price', 'Status'];
+        const csvContent = [
+            headers.join(','),
+            ...lowStockItems.map(item => {
+                const qty = parseInt(item.quantity);
+                const status = qty === 0 ? 'OUT OF STOCK' : 'LOW STOCK';
+                return [
+                    `"${item.name}"`,
+                    item.category || 'General',
+                    qty,
+                    item.sellingPrice || 0,
+                    status
+                ].join(',');
+            })
+        ].join('\n');
+        
+        downloadCSV(csvContent, 'low_stock_alert.csv');
+    };
+
+    // --- Barcode & QR Code Generation Functions ---
+    
+    // Generate a unique barcode for an item if it doesn't have one
+    function generateBarcodeNumber() {
+        const timestamp = Date.now().toString().slice(-8);
+        const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        return timestamp + random;
+    }
+
+    window.generateMissingBarcodes = function() {
+        let count = 0;
+        inventory.forEach(item => {
+            if (!item.barcode || item.barcode.trim() === '') {
+                item.barcode = generateBarcodeNumber();
+                count++;
+            }
+        });
+        
+        if (count > 0) {
+            saveInventory();
+            renderInventory();
+            showSuccessPopup(`✅ Generated ${count} barcode(s)!`);
+        } else {
+            alert('All items already have barcodes!');
+        }
+    };
+
+    window.printSingleBarcode = function(index, type = 'barcode') {
+        const item = inventory[index];
+        if (!item) return;
+        
+        if (type === 'barcode' && !item.barcode) {
+            alert('This item has no barcode. Generate one first!');
+            return;
+        }
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Print ${type === 'qr' ? 'QR Code' : 'Barcode'} - ${item.name}</title>
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        display: flex; 
+                        justify-content: center; 
+                        align-items: center; 
+                        min-height: 100vh;
+                        margin: 0;
+                        flex-direction: column;
+                    }
+                    .label {
+                        text-align: center;
+                        padding: 10px;
+                        border: 1px dashed #ccc;
+                        margin: 10px;
+                    }
+                    .label h3 { margin: 5px 0; font-size: 14px; }
+                    .label p { margin: 3px 0; font-size: 11px; color: #666; }
+                    canvas, svg { margin: 10px auto; display: block; }
+                    @media print {
+                        body { margin: 0; }
+                        .label { border: none; page-break-after: always; }
+                    }
+                </style>
+                ${type === 'qr' ? '<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\\/script>' : '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\\/script>'}
+            </head>
+            <body>
+                <div class="label">
+                    <h3>${item.name}</h3>
+                    ${type === 'barcode' ? '<svg id="barcode"></svg>' : '<canvas id="qrcode"></canvas>'}
+                    <p>${type === 'barcode' ? item.barcode : 'Item: ' + item.name}</p>
+                    <p>Price: ₹${item.sellingPrice || 0}</p>
+                </div>
+                <script>
+                    ${type === 'barcode' 
+                        ? `JsBarcode("#barcode", "${item.barcode}", { width: 2, height: 60, displayValue: true });` 
+                        : `QRCode.toCanvas(document.getElementById('qrcode'), '${JSON.stringify({name: item.name, price: item.sellingPrice, barcode: item.barcode || ''})}', { width: 150 });`
+                    }
+                    setTimeout(() => { window.print(); }, 500);
+                <\\/script>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+    };
+
+    let barcodeModalType = 'barcode';
+    let selectedBarcodeItems = new Set();
+
+    window.openBulkBarcodePrint = function() {
+        barcodeModalType = 'barcode';
+        const itemsWithBarcodes = inventory.filter(i => i.barcode && i.barcode.trim() !== '');
+        
+        if (itemsWithBarcodes.length === 0) {
+            alert('No items with barcodes found! Generate barcodes first.');
+            return;
+        }
+        
+        openBarcodeModal(itemsWithBarcodes, 'Print Barcodes');
+    };
+
+    window.openBulkQRPrint = function() {
+        barcodeModalType = 'qr';
+        openBarcodeModal(inventory, 'Print QR Codes');
+    };
+
+    function openBarcodeModal(items, title) {
+        selectedBarcodeItems.clear();
+        document.getElementById('barcode-modal-title').textContent = title;
+        document.getElementById('barcode-modal').style.display = 'block';
+        
+        // Populate selection list
+        const selectionList = document.getElementById('barcode-selection-list');
+        selectionList.innerHTML = '';
+        
+        items.forEach((item, index) => {
+            const actualIndex = inventory.indexOf(item);
+            const label = document.createElement('label');
+            label.style.display = 'block';
+            label.style.marginBottom = '5px';
+            label.innerHTML = `
+                <input type="checkbox" class="barcode-item-checkbox" data-index="${actualIndex}" onchange="updateBarcodePreview()">
+                ${item.name} ${item.barcode ? '(' + item.barcode + ')' : ''}
+            `;
+            selectionList.appendChild(label);
+        });
+        
+        updateBarcodePreview();
+    }
+
+    window.closeBarcodeModal = function() {
+        document.getElementById('barcode-modal').style.display = 'none';
+        selectedBarcodeItems.clear();
+    };
+
+    window.toggleAllBarcodes = function() {
+        const checkboxes = document.querySelectorAll('.barcode-item-checkbox');
+        const selectAll = document.getElementById('selectAllBarcodes').checked;
+        
+        checkboxes.forEach(cb => {
+            cb.checked = selectAll;
+        });
+        
+        updateBarcodePreview();
+    };
+
+    window.updateBarcodePreview = function() {
+        selectedBarcodeItems.clear();
+        const checkboxes = document.querySelectorAll('.barcode-item-checkbox:checked');
+        
+        checkboxes.forEach(cb => {
+            selectedBarcodeItems.add(parseInt(cb.dataset.index));
+        });
+        
+        const previewContainer = document.getElementById('barcode-preview-container');
+        previewContainer.innerHTML = '';
+        
+        if (selectedBarcodeItems.size === 0) {
+            previewContainer.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #999;">Select items to preview</p>';
+            return;
+        }
+        
+        selectedBarcodeItems.forEach(index => {
+            const item = inventory[index];
+            if (!item) return;
+            
+            if (barcodeModalType === 'barcode' && (!item.barcode || item.barcode.trim() === '')) {
+                return; // Skip items without barcode
+            }
+            
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'barcode-label-preview';
+            labelDiv.innerHTML = `
+                <h4 style="margin: 5px 0; font-size: 12px;">${item.name}</h4>
+                ${barcodeModalType === 'barcode' 
+                    ? `<svg class="barcode-svg" data-barcode="${item.barcode}"></svg>` 
+                    : `<canvas class="qr-canvas" data-item="${index}" width="150" height="150"></canvas>`
+                }
+                <p style="margin: 3px 0; font-size: 10px; color: #666;">₹${item.sellingPrice || 0}</p>
+            `;
+            previewContainer.appendChild(labelDiv);
+        });
+        
+        // Render barcodes/QR codes
+        if (typeof JsBarcode !== 'undefined' && barcodeModalType === 'barcode') {
+            document.querySelectorAll('.barcode-svg').forEach(svg => {
+                try {
+                    JsBarcode(svg, svg.dataset.barcode, {
+                        width: 1.5,
+                        height: 40,
+                        displayValue: true,
+                        fontSize: 10
+                    });
+                } catch (e) {
+                    console.error('Barcode generation error:', e);
+                }
+            });
+        }
+        
+        if (typeof QRCode !== 'undefined' && barcodeModalType === 'qr') {
+            document.querySelectorAll('.qr-canvas').forEach(canvas => {
+                const index = parseInt(canvas.dataset.item);
+                const item = inventory[index];
+                try {
+                    QRCode.toCanvas(canvas, JSON.stringify({
+                        name: item.name,
+                        price: item.sellingPrice,
+                        barcode: item.barcode || ''
+                    }), { width: 150 });
+                } catch (e) {
+                    console.error('QR code generation error:', e);
+                }
+            });
+        }
+    };
+
+    window.printSelectedBarcodes = function() {
+        if (selectedBarcodeItems.size === 0) {
+            alert('Please select at least one item to print.');
+            return;
+        }
+        
+        const copies = parseInt(document.getElementById('barcodeCopies').value) || 1;
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Print ${barcodeModalType === 'qr' ? 'QR Codes' : 'Barcodes'}</title>
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        margin: 10px;
+                    }
+                    .label-grid {
+                        display: grid;
+                        grid-template-columns: repeat(3, 1fr);
+                        gap: 10px;
+                        padding: 10px;
+                    }
+                    .label {
+                        text-align: center;
+                        padding: 8px;
+                        border: 1px dashed #ccc;
+                        page-break-inside: avoid;
+                    }
+                    .label h3 { margin: 5px 0; font-size: 13px; }
+                    .label p { margin: 3px 0; font-size: 10px; color: #666; }
+                    canvas, svg { margin: 5px auto; display: block; }
+                    @media print {
+                        body { margin: 0; }
+                        .label-grid { gap: 5px; }
+                    }
+                </style>
+                ${barcodeModalType === 'qr' 
+                    ? '<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\\/script>' 
+                    : '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\\/script>'}
+            </head>
+            <body>
+                <div class="label-grid" id="labels"></div>
+                <script>
+                    const items = ${JSON.stringify(Array.from(selectedBarcodeItems).map(i => inventory[i]))};
+                    const copies = ${copies};
+                    const type = '${barcodeModalType}';
+                    const container = document.getElementById('labels');
+                    
+                    items.forEach((item, idx) => {
+                        for (let c = 0; c < copies; c++) {
+                            const label = document.createElement('div');
+                            label.className = 'label';
+                            label.innerHTML = \`
+                                <h3>\${item.name}</h3>
+                                \${type === 'barcode' 
+                                    ? '<svg class="barcode" data-code="' + item.barcode + '"></svg>' 
+                                    : '<canvas class="qr" data-idx="' + idx + '" width="120" height="120"></canvas>'}
+                                <p>\${type === 'barcode' ? item.barcode : 'Price: ₹' + item.sellingPrice}</p>
+                            \`;
+                            container.appendChild(label);
+                        }
+                    });
+                    
+                    setTimeout(() => {
+                        if (type === 'barcode' && typeof JsBarcode !== 'undefined') {
+                            document.querySelectorAll('.barcode').forEach(svg => {
+                                JsBarcode(svg, svg.dataset.code, { width: 1.5, height: 40, displayValue: false });
+                            });
+                        }
+                        
+                        if (type === 'qr' && typeof QRCode !== 'undefined') {
+                            document.querySelectorAll('.qr').forEach(canvas => {
+                                const item = items[parseInt(canvas.dataset.idx)];
+                                QRCode.toCanvas(canvas, JSON.stringify({ name: item.name, price: item.sellingPrice, barcode: item.barcode || '' }), { width: 120 });
+                            });
+                        }
+                        
+                        setTimeout(() => window.print(), 500);
+                    }, 300);
+                <\\/script>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+    };
+
     // Initial render
     // renderInventory(); // Moved to auth state change
+    
+    // Activity Log Filter Event Listener
+    const activityLogFilter = document.getElementById('activityLogFilter');
+    if (activityLogFilter) {
+        activityLogFilter.addEventListener('change', () => {
+            renderActivityLogs();
+        });
+    }
+    
+    // === QUICK WINS FEATURES ===
+    
+    // 1. Dark Mode Toggle
+    window.toggleDarkMode = function() {
+        document.body.classList.toggle('dark-mode');
+        const isDark = document.body.classList.contains('dark-mode');
+        const btn = document.getElementById('dark-mode-toggle');
+        if (btn) {
+            btn.textContent = isDark ? '☀️ Light' : '🌙 Dark';
+            btn.style.background = isDark ? '#f39c12' : '#34495e';
+        }
+        localStorage.setItem('bs_dark_mode', isDark);
+        logActivity('Settings', `Switched to ${isDark ? 'Dark' : 'Light'} mode`);
+    };
+    
+    // Load dark mode preference
+    if (localStorage.getItem('bs_dark_mode') === 'true') {
+        toggleDarkMode();
+    }
+    
+    // 2. Calculator Widget
+    let calcExpression = '';
+    
+    window.toggleCalculator = function() {
+        const calc = document.getElementById('calculator-widget');
+        calc.style.display = calc.style.display === 'none' ? 'block' : 'none';
+        if (calc.style.display === 'block') {
+            calcClear();
+        }
+    };
+    
+    window.calcInput = function(value) {
+        calcExpression += value;
+        document.getElementById('calc-display').value = calcExpression;
+    };
+    
+    window.calcClear = function() {
+        calcExpression = '';
+        document.getElementById('calc-display').value = '';
+    };
+    
+    window.calcEqual = function() {
+        try {
+            const result = eval(calcExpression.replace('×', '*'));
+            document.getElementById('calc-display').value = result;
+            calcExpression = result.toString();
+        } catch (e) {
+            document.getElementById('calc-display').value = 'Error';
+            calcExpression = '';
+        }
+    };
+    
+    // 3. Voice Search
+    window.startVoiceSearch = function() {
+        if (!('webkitSpeechRecognition' in window)) {
+            alert('Voice search is not supported in your browser. Please use Chrome.');
+            return;
+        }
+        
+        const recognition = new webkitSpeechRecognition();
+        recognition.lang = 'en-IN';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        
+        recognition.onstart = function() {
+            document.getElementById('billItemSearch').placeholder = '🎤 Listening...';
+            document.getElementById('billItemSearch').style.borderColor = '#e74c3c';
+        };
+        
+        recognition.onresult = function(event) {
+            const transcript = event.results[0][0].transcript;
+            document.getElementById('billItemSearch').value = transcript;
+            document.getElementById('billItemSearch').style.borderColor = '#27ae60';
+            setTimeout(() => {
+                document.getElementById('billItemSearch').style.borderColor = '#ddd';
+                document.getElementById('billItemSearch').placeholder = 'Name or Barcode';
+            }, 2000);
+        };
+        
+        recognition.onerror = function(event) {
+            console.error('Voice recognition error:', event.error);
+            document.getElementById('billItemSearch').placeholder = 'Name or Barcode';
+            document.getElementById('billItemSearch').style.borderColor = '#ddd';
+        };
+        
+        recognition.start();
+    };
+    
+    // 4. Backup/Restore Database
+    window.backupDatabase = function() {
+        const backupData = {
+            inventory: inventory,
+            transactions: transactions,
+            settings: settings,
+            categories: categories,
+            appUsers: appUsers,
+            activityLogs: activityLogs,
+            backupDate: new Date().toISOString(),
+            version: '1.0'
+        };
+        
+        const dataStr = JSON.stringify(backupData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `billing_backup_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        
+        logActivity('Backup', 'Database backed up successfully');
+        alert('✅ Database backup downloaded successfully!');
+    };
+    
+    window.restoreDatabase = function(event) {
+        if (!confirm('⚠️ WARNING: This will replace all current data with the backup. Continue?')) {
+            event.target.value = '';
+            return;
+        }
+        
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const backupData = JSON.parse(e.target.result);
+                
+                // Validate backup structure
+                if (!backupData.inventory || !backupData.version) {
+                    alert('❌ Invalid backup file format!');
+                    return;
+                }
+                
+                // Restore data
+                inventory = backupData.inventory || [];
+                transactions = backupData.transactions || [];
+                settings = backupData.settings || settings;
+                categories = backupData.categories || categories;
+                appUsers = backupData.appUsers || appUsers;
+                activityLogs = backupData.activityLogs || [];
+                
+                // Save to localStorage
+                localStorage.setItem('bs_inventory', JSON.stringify(inventory));
+                localStorage.setItem('bs_transactions', JSON.stringify(transactions));
+                localStorage.setItem('bs_settings', JSON.stringify(settings));
+                localStorage.setItem('bs_categories', JSON.stringify(categories));
+                localStorage.setItem('bs_appUsers', JSON.stringify(appUsers));
+                localStorage.setItem('bs_activity_logs', JSON.stringify(activityLogs));
+                
+                // Sync to Firebase
+                if (currentUser) {
+                    set(ref(db, `users/${currentUser.uid}`), {
+                        inventory, transactions, settings, categories, appUsers, activityLogs
+                    });
+                }
+                
+                // Re-render
+                renderInventory();
+                renderReports();
+                renderAppUsers();
+                renderActivityLogs();
+                loadSettingsForm();
+                
+                logActivity('Restore', `Database restored from backup (${backupData.backupDate})`);
+                alert(`✅ Database restored successfully!\\nBackup from: ${new Date(backupData.backupDate).toLocaleString()}`);
+            } catch (error) {
+                console.error('Restore error:', error);
+                alert('❌ Failed to restore backup: ' + error.message);
+            }
+            event.target.value = '';
+        };
+        reader.readAsText(file);
+    };
+    
+    // 5. Keyboard Shortcuts
+    let shortcutsVisible = false;
+    
+    document.addEventListener('keydown', (e) => {
+        // F2 - New Bill
+        if (e.key === 'F2') {
+            e.preventDefault();
+            if (confirm('Start a new bill? Current bill will be cleared.')) {
+                currentBill = [];
+                renderBill();
+                switchTab('billing');
+                document.getElementById('billItemSearch').focus();
+            }
+        }
+        
+        // F3 - Search Inventory
+        if (e.key === 'F3') {
+            e.preventDefault();
+            switchTab('inventory');
+            document.getElementById('inventorySearch').focus();
+        }
+        
+        // F4 - Add to Bill Focus
+        if (e.key === 'F4') {
+            e.preventDefault();
+            switchTab('billing');
+            document.getElementById('billItemSearch').focus();
+        }
+        
+        // F9 - Toggle Calculator
+        if (e.key === 'F9') {
+            e.preventDefault();
+            toggleCalculator();
+        }
+        
+        // Ctrl+P - Print Invoice
+        if (e.ctrlKey && e.key === 'p') {
+            e.preventDefault();
+            if (currentBill.length > 0) {
+                printBill();
+            } else {
+                alert('No items in current bill to print.');
+            }
+        }
+        
+        // Ctrl+S - Save/Add Item (prevent default save)
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            const activeTab = getActiveTabName();
+            if (activeTab === 'inventory') {
+                document.getElementById('inventory-form').dispatchEvent(new Event('submit'));
+            } else if (activeTab === 'billing') {
+                document.getElementById('billing-form').dispatchEvent(new Event('submit'));
+            }
+        }
+        
+        // Ctrl+? - Toggle shortcuts help
+        if (e.ctrlKey && e.key === '/') {
+            e.preventDefault();
+            shortcutsVisible = !shortcutsVisible;
+            document.getElementById('shortcuts-help').style.display = shortcutsVisible ? 'block' : 'none';
+        }
+    });
+    
+    // 6. Image Upload Handler
+    document.getElementById('itemImage')?.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                // Store image as base64 in item data (will be added in form submit)
+                window.pendingItemImage = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+    });
 });
